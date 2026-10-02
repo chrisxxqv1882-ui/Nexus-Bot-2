@@ -106,10 +106,9 @@ class ModalResponderFormulario(discord.ui.Modal):
         self.preguntas = preguntas
         self.inputs = []
 
-        # Crear dinámicamente hasta 5 inputs según las preguntas configuradas
         for i, pregunta in enumerate(preguntas[:5]):
             text_input = discord.ui.TextInput(
-                label=pregunta[:45], # Límite de caracteres de Discord para la etiqueta
+                label=pregunta[:45],
                 style=discord.TextStyle.paragraph,
                 placeholder="Escribe tu respuesta aquí...",
                 required=True,
@@ -119,24 +118,22 @@ class ModalResponderFormulario(discord.ui.Modal):
             self.add_item(text_input)
 
     async def on_submit(self, interaction: discord.Interaction):
-        # Recopilar las respuestas dadas
         respuestas_texto = ""
         for i, pregunta in enumerate(self.preguntas[:5]):
             respuestas_texto += f"**P{i+1}: {pregunta}**\n↳ {self.inputs[i].value}\n\n"
 
         embed = discord.Embed(
-            title=f"📝 Postulación enviada: {self.nombre_bonito}",
-            description=f"**Postulante:** {interaction.user.mention}\n\n{respuestas_texto}",
+            title=f"📝 Postulación: {self.nombre_bonito}",
+            description=f"👤 **Postulante:** {interaction.user.mention} (`{interaction.user}`)\n\n{respuestas_texto}",
             color=0xF1C40F
         )
-        embed.set_footer(text="Esperando revisión del Staff autorizado.")
+        embed.set_footer(text="Esperando revisión y nota del Staff autorizado.")
 
-        # Editar el mensaje público original para mostrar las respuestas y cambiar el botón a la vista de staff
         await interaction.message.edit(embed=embed, view=VistaRevisionPostulacion(interaction.user))
-        await interaction.response.send_message("✅ ¡Tus respuestas han sido enviadas correctamente para su revisión!", ephemeral=True)
+        await interaction.response.send_message("✅ ¡Tus respuestas han sido enviadas correctamente!", ephemeral=True)
 
 
-# --- VISTA INICIAL PARA EL USUARIO (BOTÓN RESPONDER) ---
+# --- VISTA INICIAL PARA EL USUARIO ---
 
 class VistaBotonResponder(discord.ui.View):
     def __init__(self, tipo: str, nombre_bonito: str, preguntas: list):
@@ -147,11 +144,51 @@ class VistaBotonResponder(discord.ui.View):
 
     @discord.ui.button(label="✍️ Responder Formulario", style=discord.ButtonStyle.success, custom_id="btn_responder_form")
     async def responder(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Asegurar que solo el creador del mensaje/comando pueda responder
         await interaction.response.send_modal(ModalResponderFormulario(self.tipo, self.nombre_bonito, self.preguntas))
 
 
-# --- VISTA DE REVISIÓN PARA EL STAFF (APROBADO / RECHAZADO) ---
+# --- MODAL PARA ESCRIBIR LA NOTA DEL STAFF ---
+
+class ModalNotaStaff(discord.ui.Modal):
+    def __init__(self, estado: str, autor_postulacion):
+        super().__init__(title=f"Nota de Postulación ({estado})")
+        self.estado = estado
+        self.autor_postulacion = autor_postulacion
+
+        self.nota_input = discord.ui.TextInput(
+            label="Escribe una nota o razón",
+            style=discord.TextStyle.paragraph,
+            placeholder="Ej: Excelente actitud, bienvenido / Faltó experiencia...",
+            required=True,
+            max_length=500
+        )
+        self.add_item(self.nota_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        nota = self.nota_input.value
+        
+        # Desactivar botones de la vista
+        for child in interaction.message.components:
+            for row_child in child.children:
+                row_child.disabled = True
+
+        embed_actual = interaction.message.embeds[0]
+        
+        if self.estado == "APROBADO":
+            embed_actual.color = discord.Color.green()
+            resultado_txt = f"✅ **Aprobado** por {interaction.user.mention}"
+        else:
+            embed_actual.color = discord.Color.red()
+            resultado_txt = f"❌ **No Clasificado / Rechazado** por {interaction.user.mention}"
+
+        embed_actual.add_field(name="📌 Resultado", value=resultado_txt, inline=False)
+        embed_actual.add_field(name="📝 Nota del Staff", value=nota, inline=False)
+
+        await interaction.message.edit(embed=embed_actual, view=None)
+        await interaction.response.send_message(f"✅ Postulación procesada correctamente con nota añadida.", ephemeral=True)
+
+
+# --- VISTA DE REVISIÓN PARA EL STAFF ---
 
 class VistaRevisionPostulacion(discord.ui.View):
     def __init__(self, autor_postulacion):
@@ -163,30 +200,14 @@ class VistaRevisionPostulacion(discord.ui.View):
         if not verificar_permisos(interaction):
             return await interaction.response.send_message("❌ No tienes el rol autorizado para atender postulaciones.", ephemeral=True)
         
-        for child in self.children:
-            child.disabled = True
-
-        embed_actual = interaction.message.embeds[0]
-        embed_actual.color = discord.Color.green()
-        embed_actual.add_field(name="📌 Resultado", value=f"✅ **¡Aprobado!** por {interaction.user.mention}", inline=False)
-
-        await interaction.message.edit(embed=embed_actual, view=self)
-        await interaction.response.send_message(f"✅ Has aprobado la postulación de {self.autor_postulacion.mention}.", ephemeral=True)
+        await interaction.response.send_modal(ModalNotaStaff("APROBADO", self.autor_postulacion))
 
     @discord.ui.button(label="❌ Rechazado", style=discord.ButtonStyle.danger, custom_id="btn_rechazar")
     async def rechazar(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not verificar_permisos(interaction):
             return await interaction.response.send_message("❌ No tienes el rol autorizado para atender postulaciones.", ephemeral=True)
         
-        for child in self.children:
-            child.disabled = True
-
-        embed_actual = interaction.message.embeds[0]
-        embed_actual.color = discord.Color.red()
-        embed_actual.add_field(name="📌 Resultado", value=f"❌ **No Clasificado / Rechazado** por {interaction.user.mention}", inline=False)
-
-        await interaction.message.edit(embed=embed_actual, view=self)
-        await interaction.response.send_message(f"❌ Postulación marcada como **no clasificada**.", ephemeral=True)
+        await interaction.response.send_modal(ModalNotaStaff("RECHAZADO", self.autor_postulacion))
 
 
 # --- COMANDOS DE CONFIGURACIÓN Y POSTULACIÓN ---
@@ -223,7 +244,6 @@ async def enviar_anuncio_postulacion(interaction: discord.Interaction, tipo: str
         color=0x3498DB
     )
 
-    # Envía el embed público con el botón "Responder"
     await interaction.channel.send(embed=embed, view=VistaBotonResponder(tipo, nombre, preguntas))
     await interaction.response.send_message("✅ ¡Formulario enviado al chat público!", ephemeral=True)
 
