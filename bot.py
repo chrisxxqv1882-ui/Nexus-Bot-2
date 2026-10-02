@@ -4,9 +4,10 @@ import asyncio
 import discord
 from discord import app_commands
 
-# Configuración global del bot (Rol autorizado para atender postulaciones)
+# Configuración global del bot (Roles autorizados)
 config_global = {
-    "rol_atencion_id": None # ID del rol que puede aprobar/rechazar
+    "rol_comandos_id": None,  # Rol que puede usar los comandos de postulación
+    "rol_atencion_id": None   # Rol que puede aprobar/rechazar
 }
 
 # Base de datos en memoria para las preguntas de los formularios
@@ -32,7 +33,16 @@ client = Bot()
 async def on_ready():
     print(f'¡Bot conectado con éxito como {client.user}!')
 
-def verificar_permisos(interaction: discord.Interaction) -> bool:
+def verificar_permisos_comandos(interaction: discord.Interaction) -> bool:
+    if interaction.user.guild_permissions.administrator:
+        return True
+    if config_global["rol_comandos_id"]:
+        rol = interaction.guild.get_role(config_global["rol_comandos_id"])
+        if rol and rol in interaction.user.roles:
+            return True
+    return False
+
+def verificar_permisos_atencion(interaction: discord.Interaction) -> bool:
     if interaction.user.guild_permissions.administrator:
         return True
     if config_global["rol_atencion_id"]:
@@ -99,11 +109,12 @@ class VistaConfiguracion(discord.ui.View):
 # --- MODAL DE RESPUESTAS DEL USUARIO ---
 
 class ModalResponderFormulario(discord.ui.Modal):
-    def __init__(self, tipo: str, nombre_bonito: str, preguntas: list):
+    def __init__(self, tipo: str, nombre_bonito: str, preguntas: list, miembro_postulado: discord.Member):
         super().__init__(title=f"Postulación: {nombre_bonito}")
         self.tipo = tipo
         self.nombre_bonito = nombre_bonito
         self.preguntas = preguntas
+        self.miembro_postulado = miembro_postulado
         self.inputs = []
 
         for i, pregunta in enumerate(preguntas[:5]):
@@ -124,27 +135,28 @@ class ModalResponderFormulario(discord.ui.Modal):
 
         embed = discord.Embed(
             title=f"📝 Postulación: {self.nombre_bonito}",
-            description=f"👤 **Postulante:** {interaction.user.mention} (`{interaction.user}`)\n\n{respuestas_texto}",
+            description=f"👤 **Postulante:** {self.miembro_postulado.mention} (`{self.miembro_postulado}`)\n\n{respuestas_texto}",
             color=0xF1C40F
         )
-        embed.set_footer(text="Esperando revisión y nota del Staff autorizado.")
+        embed.set_footer(text=f"Enviado por {interaction.user} | Esperando revisión del Staff.")
 
-        await interaction.message.edit(embed=embed, view=VistaRevisionPostulacion(interaction.user))
+        await interaction.message.edit(embed=embed, view=VistaRevisionPostulacion(self.miembro_postulado))
         await interaction.response.send_message("✅ ¡Tus respuestas han sido enviadas correctamente!", ephemeral=True)
 
 
 # --- VISTA INICIAL PARA EL USUARIO ---
 
 class VistaBotonResponder(discord.ui.View):
-    def __init__(self, tipo: str, nombre_bonito: str, preguntas: list):
+    def __init__(self, tipo: str, nombre_bonito: str, preguntas: list, miembro_postulado: discord.Member):
         super().__init__(timeout=None)
         self.tipo = tipo
         self.nombre_bonito = nombre_bonito
         self.preguntas = preguntas
+        self.miembro_postulado = miembro_postulado
 
     @discord.ui.button(label="✍️ Responder Formulario", style=discord.ButtonStyle.success, custom_id="btn_responder_form")
     async def responder(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ModalResponderFormulario(self.tipo, self.nombre_bonito, self.preguntas))
+        await interaction.response.send_modal(ModalResponderFormulario(self.tipo, self.nombre_bonito, self.preguntas, self.miembro_postulado))
 
 
 # --- MODAL PARA ESCRIBIR LA NOTA DEL STAFF ---
@@ -167,7 +179,6 @@ class ModalNotaStaff(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         nota = self.nota_input.value
         
-        # Desactivar botones de la vista
         for child in interaction.message.components:
             for row_child in child.children:
                 row_child.disabled = True
@@ -197,14 +208,14 @@ class VistaRevisionPostulacion(discord.ui.View):
 
     @discord.ui.button(label="✅ Aprobado", style=discord.ButtonStyle.success, custom_id="btn_aprobar")
     async def aprobar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not verificar_permisos(interaction):
+        if not verificar_permisos_atencion(interaction):
             return await interaction.response.send_message("❌ No tienes el rol autorizado para atender postulaciones.", ephemeral=True)
         
         await interaction.response.send_modal(ModalNotaStaff("APROBADO", self.autor_postulacion))
 
     @discord.ui.button(label="❌ Rechazado", style=discord.ButtonStyle.danger, custom_id="btn_rechazar")
     async def rechazar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not verificar_permisos(interaction):
+        if not verificar_permisos_atencion(interaction):
             return await interaction.response.send_message("❌ No tienes el rol autorizado para atender postulaciones.", ephemeral=True)
         
         await interaction.response.send_modal(ModalNotaStaff("RECHAZADO", self.autor_postulacion))
@@ -212,25 +223,34 @@ class VistaRevisionPostulacion(discord.ui.View):
 
 # --- COMANDOS DE CONFIGURACIÓN Y POSTULACIÓN ---
 
-@client.tree.command(name="configuracion", description="Panel para configurar los formularios y el rol de atención")
-@app_commands.describe(rol_atencion="Rol que tendrá permisos para atender y aprobar/rechazar postulaciones")
-async def configuracion(interaction: discord.Interaction, rol_atencion: discord.Role = None):
+@client.tree.command(name="configuracion", description="Panel para configurar los formularios y roles autorizados")
+@app_commands.describe(
+    rol_comandos="Rol que tendrá permiso para ejecutar los comandos de postulación",
+    rol_atencion="Rol que tendrá permisos para aprobar/rechazar postulaciones"
+)
+async def configuracion(interaction: discord.Interaction, rol_comandos: discord.Role = None, rol_atencion: discord.Role = None):
     if not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message("❌ Solo un administrador puede usar este comando.", ephemeral=True)
 
-    texto_rol = ""
+    texto_roles = ""
+    if rol_comandos:
+        config_global["rol_comandos_id"] = rol_comandos.id
+        texto_roles += f"\n- Rol para comandos de postulación: {rol_comandos.mention}"
     if rol_atencion:
         config_global["rol_atencion_id"] = rol_atencion.id
-        texto_rol = f"\n- Rol autorizado para atender: {rol_atencion.mention}"
+        texto_roles += f"\n- Rol para atender/revisar: {rol_atencion.mention}"
 
     embed = discord.Embed(
-        title="⚙️ Configuración de Formularios",
-        description=f"Usa los botones de abajo para editar las preguntas de cada formulario.{texto_rol}",
+        title="⚙️ Configuración del Bot",
+        description=f"Usa los botones de abajo para editar las preguntas de cada formulario.{texto_roles}",
         color=0x3498db
     )
     await interaction.response.send_message(embed=embed, view=VistaConfiguracion(), ephemeral=True)
 
-async def enviar_anuncio_postulacion(interaction: discord.Interaction, tipo: str, nombre: str):
+async def enviar_anuncio_postulacion(interaction: discord.Interaction, tipo: str, nombre: str, miembro: discord.Member):
+    if not verificar_permisos_comandos(interaction):
+        return await interaction.response.send_message("❌ No tienes el rol autorizado para ejecutar comandos de postulación.", ephemeral=True)
+
     preguntas = postulaciones_config.get(tipo, [])
     if not preguntas:
         return await interaction.response.send_message(
@@ -240,33 +260,37 @@ async def enviar_anuncio_postulacion(interaction: discord.Interaction, tipo: str
 
     embed = discord.Embed(
         title=f"📝 Postulación Abierta: {nombre}",
-        description=f"Iniciado por: {interaction.user.mention}\nHaz clic en el botón de abajo para rellenar tus respuestas.",
+        description=f"Candidato: {miembro.mention}\nIniciado por: {interaction.user.mention}\nHaz clic en el botón de abajo para rellenar tus respuestas.",
         color=0x3498DB
     )
 
-    await interaction.channel.send(embed=embed, view=VistaBotonResponder(tipo, nombre, preguntas))
+    await interaction.channel.send(embed=embed, view=VistaBotonResponder(tipo, nombre, preguntas, miembro))
     await interaction.response.send_message("✅ ¡Formulario enviado al chat público!", ephemeral=True)
 
 @client.tree.command(name="postulacion_staff", description="Inicia el formulario para el Cuerpo de Moderación")
-async def postulacion_staff(interaction: discord.Interaction):
-    await enviar_anuncio_postulacion(interaction, "staff", "Cuerpo de Moderación")
+@app_commands.describe(miembro="¿Qué usuario va a aplicar el formulario?")
+async def postulacion_staff(interaction: discord.Interaction, miembro: discord.Member):
+    await enviar_anuncio_postulacion(interaction, "staff", "Cuerpo de Moderación", miembro)
 
 @client.tree.command(name="postulacion_casa-ally", description="Inicia el formulario para Casa Alianza")
-async def postulacion_casa_ally(interaction: discord.Interaction):
-    await enviar_anuncio_postulacion(interaction, "ally", "Casa Alianza")
+@app_commands.describe(miembro="¿Qué usuario va a aplicar el formulario?")
+async def postulacion_casa_ally(interaction: discord.Interaction, miembro: discord.Member):
+    await enviar_anuncio_postulacion(interaction, "ally", "Casa Alianza", miembro)
 
 @client.tree.command(name="postulaicon_redes", description="Inicia el formulario para el Cuerpo de Redes")
-async def postulaicon_redes(interaction: discord.Interaction):
-    await enviar_anuncio_postulacion(interaction, "redes", "Cuerpo de Redes")
+@app_commands.describe(miembro="¿Qué usuario va a aplicar el formulario?")
+async def postulaicon_redes(interaction: discord.Interaction, miembro: discord.Member):
+    await enviar_anuncio_postulacion(interaction, "redes", "Cuerpo de Redes", miembro)
 
 @client.tree.command(name="postulacion_nexus", description="Inicia el formulario para el Cuerpo de Programación")
-async def postulacion_nexus(interaction: discord.Interaction):
-    await enviar_anuncio_postulacion(interaction, "nexus", "Cuerpo de Programación (Nexus)")
+@app_commands.describe(miembro="¿Qué usuario va a aplicar el formulario?")
+async def postulacion_nexus(interaction: discord.Interaction, miembro: discord.Member):
+    await enviar_anuncio_postulacion(interaction, "nexus", "Cuerpo de Programación (Nexus)", miembro)
 
 
-# --- JUEGOS INTERACTIVOS ---
+# --- JUEGOS INTERACTIVOS (LIBRES PARA TODOS) ---
 
-@client.tree.command(name="dado", description="Lanza un dado de N caras")
+@client.tree.command(name="dado", description="Lanza un dado de N caras (Libre para todos)")
 @app_commands.describe(caras="Número de caras (por defecto 6)")
 async def dado(interaction: discord.Interaction, caras: int = 6):
     if caras < 2:
@@ -274,7 +298,7 @@ async def dado(interaction: discord.Interaction, caras: int = 6):
     resultado = random.randint(1, caras)
     await interaction.response.send_message(f"🎲 {interaction.user.mention} lanzó un dado de {caras} caras y salió: **{resultado}**")
 
-@client.tree.command(name="adivina_palabra", description="Juega a adivinar una palabra secreta por letras")
+@client.tree.command(name="adivina_palabra", description="Juega a adivinar una palabra secreta por letras (Libre para todos)")
 async def adivina_palabra(interaction: discord.Interaction):
     palabras = ["discord", "python", "railway", "programacion", "moderacion", "desarrollo", "servidor"]
     palabra_secreta = random.choice(palabras)
@@ -321,7 +345,7 @@ async def adivina_palabra(interaction: discord.Interaction):
         await interaction.edit_original_response(content=f"❌ ¡Te has quedado sin intentos! La palabra era **{palabra_secreta}**.")
 
 
-@client.tree.command(name="colgado", description="El clásico juego del ahorcado")
+@client.tree.command(name="colgado", description="El clásico juego del ahorcado (Libre para todos)")
 async def colgado(interaction: discord.Interaction):
     palabras_ahorcado = ["discord", "bot", "python", "desarrollo", "videojuego", "computadora"]
     secreta = random.choice(palabras_ahorcado)
