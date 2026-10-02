@@ -41,12 +41,17 @@ postulaciones_config = {
 
 class Bot(discord.Client):
     def __init__(self):
-        super().__init__(intents=discord.Intents.default() | discord.Intents.message_content)
+        # Solución: Definir los intents por separado para evitar el error de flags
+        intents = discord.Intents.default()
+        intents.message_content = True
+        
+        super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
         await self.tree.sync()
         print("¡Slash commands sincronizados!")
+
 
 client = Bot()
 
