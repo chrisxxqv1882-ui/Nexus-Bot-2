@@ -4,33 +4,25 @@ import asyncio
 import discord
 from discord import app_commands
 
-# Configuración global editable (Tickets y Postulaciones)
+# Configuración global editable para los formularios y su publicación
 config_global = {
     "admin_rol_id": None, 
-    "rol_id": 1549479823200747521,
-    "categoria_id": None,
-    "titulo": "⚖️ Sistema de Apelaciones y Reclamaciones",
-    "descripcion": "Si necesitas abrir un ticket, reclamar o apelar una sanción, haz clic en el botón de abajo.",
+    "titulo": "📝 Panel de Postulaciones y Formularios",
+    "descripcion": "Haz clic en el botón correspondiente abajo para ver el formulario y postularte.",
     "color": 0x3498db,
-    "autor": "Hakkuze - Moderación",
+    "autor": "Hakkuze - Reclutamiento",
     "thumbnail": None,
     "image": None,
-    "footer": "Sistema seguro de tickets",
-    "ticket_embed_titulo": "📥 ¡Nuevo Ticket Abierto!",
-    "ticket_embed_descripcion": "El usuario {usuario} ha iniciado un caso.\n\n**Motivo / Razón:**\n{razon}",
-    "ticket_embed_footer": "Atiende con respeto y profesionalismo."
+    "footer": "Sistema de postulaciones oficiales"
 }
 
-# Base de datos temporal para formularios de postulaciones
-# (Guarda las preguntas configuradas para cada tipo)
+# Base de datos temporal para guardar las preguntas personalizadas de cada formulario
 postulaciones_config = {
     "staff": ["¿Cuál es tu edad?", "¿Por qué quieres ser Moderador?", "¿Tienes experiencia previa?"],
     "ally": ["¿Cuál es tu servidor?", "¿Cuántos miembros activos tienes?", "¿Cuál es la invitación?"],
     "redes": ["¿Qué plataformas manejas?", "¿Tienes ejemplos de ediciones o publicaciones?"],
     "nexus": ["¿Qué lenguajes de programación conoces?", "¿Cuánto tiempo llevas programando?"]
 }
-
-apelaciones_db = []
 
 class Bot(discord.Client):
     def __init__(self):
@@ -56,7 +48,7 @@ def verificar_permisos(interaction: discord.Interaction) -> bool:
             return True
     return False
 
-# --- MODALES PARA EL EDITOR VISUAL ---
+# --- MODALES PARA EL EDITOR VISUAL DE CONFIGURACIÓN ---
 
 class ModalEditarTexto(discord.ui.Modal):
     def __init__(self, campo: str):
@@ -94,9 +86,6 @@ class ModalEditarURLs(discord.ui.Modal):
         config_global[self.campo] = None if val.lower() == "none" else val
         await interaction.response.send_message(f"✅ ¡{self.campo.capitalize()} actualizado!", ephemeral=True)
 
-
-# --- EDITOR DE PREGUNTAS DE POSTULACIONES ---
-
 class ModalEditarPreguntas(discord.ui.Modal):
     def __init__(self, tipo: str, nombre_bonito: str):
         super().__init__(title=f"Configurar {nombre_bonito}")
@@ -104,7 +93,7 @@ class ModalEditarPreguntas(discord.ui.Modal):
         
         preguntas_actuales = "\n".join(postulaciones_config.get(tipo, []))
         self.preguntas_input = discord.ui.TextInput(
-            label="Preguntas (una por línea)",
+            label="Preguntas (escribe una por línea)",
             style=discord.TextStyle.paragraph,
             placeholder="Pregunta 1\nPregunta 2\nPregunta 3",
             default=preguntas_actuales,
@@ -114,13 +103,12 @@ class ModalEditarPreguntas(discord.ui.Modal):
         self.add_item(self.preguntas_input)
 
     async def on_submit(self, interaction: discord.Interaction):
-        # Separa las preguntas por saltos de línea
         nuevas_preguntas = [p.strip() for p in self.preguntas_input.value.split('\n') if p.strip()]
         postulaciones_config[self.tipo] = nuevas_preguntas
-        await interaction.response.send_message(f"✅ ¡Formulario actualizado con {len(nuevas_preguntas)} preguntas!", ephemeral=True)
+        await interaction.response.send_message(f"✅ ¡Formulario de **{self.tipo.upper()}** actualizado con {len(nuevas_preguntas)} preguntas!", ephemeral=True)
 
 
-# --- VISTA DEL EDITOR VISUAL DE TICKETS Y POSTULACIONES ---
+# --- VISTA DEL EDITOR VISUAL DE CONFIGURACIÓN Y PUBLICACIÓN ---
 
 class VistaEditorVisual(discord.ui.View):
     def __init__(self):
@@ -146,19 +134,19 @@ class VistaEditorVisual(discord.ui.View):
                     await inter.response.send_message("❌ Código HEX inválido.", ephemeral=True)
         await interaction.response.send_modal(ModalColor())
 
-    @discord.ui.button(label="📝 Config. Staff", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="📝 Staff", style=discord.ButtonStyle.secondary, row=1)
     async def btn_cfg_staff(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ModalEditarPreguntas("staff", "Cuerpo de Moderación"))
 
-    @discord.ui.button(label="📝 Config. Ally", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="📝 Ally", style=discord.ButtonStyle.secondary, row=1)
     async def btn_cfg_ally(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ModalEditarPreguntas("ally", "Casa Alianza"))
 
-    @discord.ui.button(label="📝 Config. Redes", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="📝 Redes", style=discord.ButtonStyle.secondary, row=1)
     async def btn_cfg_redes(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ModalEditarPreguntas("redes", "Cuerpo de Redes"))
 
-    @discord.ui.button(label="📝 Config. Nexus", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="📝 Nexus", style=discord.ButtonStyle.secondary, row=1)
     async def btn_cfg_nexus(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ModalEditarPreguntas("nexus", "Cuerpo de Programación"))
 
@@ -170,7 +158,7 @@ class VistaEditorVisual(discord.ui.View):
     async def btn_image(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ModalEditarURLs("image"))
 
-    @discord.ui.button(label="🚀 Publicar Panel Tickets", style=discord.ButtonStyle.danger, row=2)
+    @discord.ui.button(label="🚀 Publicar Panel", style=discord.ButtonStyle.danger, row=2)
     async def btn_publicar(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = discord.Embed(
             title=config_global["titulo"],
@@ -182,69 +170,53 @@ class VistaEditorVisual(discord.ui.View):
         if config_global["image"]: embed.set_image(url=config_global["image"])
         if config_global["footer"]: embed.set_footer(text=config_global["footer"])
 
-        await interaction.channel.send(embed=embed, view=VistaApelacionBotonesPublico())
-        await interaction.response.send_message("✅ ¡Panel de tickets publicado con éxito!", ephemeral=True)
+        # Vista pública con botones para cada postulación
+        await interaction.channel.send(embed=embed, view=VistaBotonesPostulacionesPublicas())
+        await interaction.response.send_message("✅ ¡Panel de postulaciones publicado con éxito!", ephemeral=True)
 
 
-class VistaApelacionBotonesPublico(discord.ui.View):
+class VistaBotonesPostulacionesPublicas(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="🎫 Abrir Ticket / Reclamación", style=discord.ButtonStyle.danger, custom_id="btn_abrir_ticket")
-    async def boton_apelar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ApelacionModal())
-
-
-class ApelacionModal(discord.ui.Modal, title="Formulario de Reclamación / Ticket"):
-    razon = discord.ui.TextInput(
-        label="Motivo de tu ticket o reclamación",
-        style=discord.TextStyle.paragraph,
-        placeholder="Explica detalladamente tu caso...",
-        required=True,
-        max_length=1000
-    )
-
-    async def on_submit(self, interaction: discord.Interaction):
-        apelaciones_db.append({"usuario": str(interaction.user), "id_usuario": interaction.user.id, "razon": self.razon.value})
-        guild = interaction.guild
-        rol_obj = guild.get_role(config_global["rol_id"])
-        categoria = discord.utils.get(guild.categories, id=int(config_global["categoria_id"])) if config_global["categoria_id"] else None
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True, read_message_history=True)
-        }
-        if rol_obj: overwrites[rol_obj] = discord.PermissionOverwrite(read_messages=True, send_messages=True, read_message_history=True)
-
-        canal = await guild.create_text_channel(f"ticket-{interaction.user.name}".lower(), category=categoria, overwrites=overwrites)
-        if canal:
-            embed_ticket = discord.Embed(
-                title=config_global["ticket_embed_titulo"],
-                description=config_global["ticket_embed_descripcion"].format(usuario=interaction.user.mention, razon=self.razon.value),
-                color=config_global["color"]
+    async def mostrar_formulario(self, interaction: discord.Interaction, tipo: str, nombre: str):
+        preguntas = postulaciones_config.get(tipo, [])
+        if not preguntas:
+            return await interaction.response.send_message(
+                f"❌ El formulario de **{nombre}** aún no ha sido configurado. Un administrador debe usar el comando `/configuracion`.",
+                ephemeral=True
             )
-            embed_ticket.set_footer(text=config_global["ticket_embed_footer"])
-            
-            class VistaCerrarTicket(discord.ui.View):
-                @discord.ui.button(label="🔒 Cerrar Ticket", style=discord.ButtonStyle.secondary, custom_id="cerrar_tk")
-                async def cerrar(self, inter: discord.Interaction, btn: discord.ui.Button):
-                    await inter.response.send_message("🔒 Cerrando canal en 3 segundos...")
-                    await asyncio.sleep(3)
-                    await inter.channel.delete()
+        texto_preguntas = "\n".join([f"**{i+1}.** {p}" for i, p in enumerate(preguntas)])
+        embed = discord.Embed(
+            title=f"📝 Postulación: {nombre}",
+            description=f"Preguntas configuradas:\n\n{texto_preguntas}",
+            color=0x2ecc71
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
-            mencion = f"<@&{config_global['rol_id']}>" if rol_obj else ""
-            await canal.send(content=f"{mencion} ¡Nuevo ticket abierto por {interaction.user.mention}!", embed=embed_ticket, view=VistaCerrarTicket())
-            await interaction.response.send_message(f"✅ ¡Tu ticket ha sido creado correctamente en {canal.mention}!", ephemeral=True)
-        else:
-            await interaction.response.send_message("❌ Hubo un error al crear el canal.", ephemeral=True)
+    @discord.ui.button(label="Staff", style=discord.ButtonStyle.primary, custom_id="pub_staff")
+    async def p_staff(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.mostrar_formulario(interaction, "staff", "Cuerpo de Moderación")
+
+    @discord.ui.button(label="Casa Alianza", style=discord.ButtonStyle.primary, custom_id="pub_ally")
+    async def p_ally(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.mostrar_formulario(interaction, "ally", "Casa Alianza")
+
+    @discord.ui.button(label="Cuerpo Redes", style=discord.ButtonStyle.primary, custom_id="pub_redes")
+    async def p_redes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.mostrar_formulario(interaction, "redes", "Cuerpo de Redes")
+
+    @discord.ui.button(label="Nexus", style=discord.ButtonStyle.primary, custom_id="pub_nexus")
+    async def p_nexus(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.mostrar_formulario(interaction, "nexus", "Cuerpo de Programación (Nexus)")
 
 
-# --- COMANDOS DE CONFIGURACIÓN ---
+# --- COMANDOS DE CONFIGURACIÓN Y POSTULACIÓN ---
 
-@client.tree.command(name="configurar", description="Abre el editor visual avanzado del bot")
-async def configurar(interaction: discord.Interaction):
+@client.tree.command(name="configuracion", description="Abre el panel de configuración y personalización de formularios")
+async def configuracion(interaction: discord.Interaction):
     if not verificar_permisos(interaction):
-        await interaction.response.send_message("❌ No tienes permisos.", ephemeral=True)
+        await interaction.response.send_message("❌ No tienes permisos para usar este comando.", ephemeral=True)
         return
 
     embed_preview = discord.Embed(
@@ -258,57 +230,146 @@ async def configurar(interaction: discord.Interaction):
     if config_global["footer"]: embed_preview.set_footer(text=config_global["footer"])
 
     await interaction.response.send_message(
-        content="✨ **Editor Visual General**\nUsa los botones para configurar los tickets y las preguntas de los formularios de postulación:",
+        content="⚙️ **Panel de Configuración**\nPersonaliza el aspecto del panel y edita las preguntas de tus formularios:",
         embed=embed_preview,
         view=VistaEditorVisual(),
         ephemeral=True
     )
 
-
-# --- COMANDOS DE POSTULACIÓN SOLICITADOS ---
-
-async def enviar_postulacion(interaction: discord.Interaction, tipo: str, nombre_bonito: str):
+async def manejar_postulacion_cmd(interaction: discord.Interaction, tipo: str, nombre: str):
     preguntas = postulaciones_config.get(tipo, [])
     if not preguntas:
         return await interaction.response.send_message(
-            "❌ Aún no se ha añadido un formulario para este servidor. Ejecuta el comando **/configurar** y añade tus preguntas.",
+            f"❌ El formulario de **{nombre}** no está configurado. Ejecuta el comando `/configuracion` para añadirlo.",
             ephemeral=True
         )
-
-    preguntas_formateadas = "\n".join([f"**{i+1}.** {p}" for i, p in enumerate(preguntas)])
+    texto_preguntas = "\n".join([f"**{i+1}.** {p}" for i, p in enumerate(preguntas)])
     embed = discord.Embed(
-        title=f"📝 Formulario de Postulación: {nombre_bonito}",
-        description=f"Responde a las siguientes preguntas:\n\n{preguntas_formateadas}",
-        color=0x2ecc71
+        title=f"📝 Formulario: {nombre}",
+        description=f"Preguntas:\n\n{texto_preguntas}",
+        color=0x3498db
     )
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@client.tree.command(name="postulacion_staff", description="Postúlate al Cuerpo de Moderación.")
+@client.tree.command(name="postulacion_staff", description="Postúlate al Cuerpo de Moderación")
 async def postulacion_staff(interaction: discord.Interaction):
-    await enviar_postulacion(interaction, "staff", "Cuerpo de Moderación")
+    await manejar_postulacion_cmd(interaction, "staff", "Cuerpo de Moderación")
 
-@client.tree.command(name="postulacion_casa-ally", description="Postúlate a Casa Alianza.")
+@client.tree.command(name="postulacion_casa-ally", description="Postúlate a Casa Alianza")
 async def postulacion_casa_ally(interaction: discord.Interaction):
-    await enviar_postulacion(interaction, "ally", "Casa Alianza")
+    await manejar_postulacion_cmd(interaction, "ally", "Casa Alianza")
 
-@client.tree.command(name="postulaicon_redes", description="Postúlate al Cuerpo de Redes.")
+@client.tree.command(name="postulaicon_redes", description="Postúlate al Cuerpo de Redes")
 async def postulaicon_redes(interaction: discord.Interaction):
-    await enviar_postulacion(interaction, "redes", "Cuerpo de Redes")
+    await manejar_postulacion_cmd(interaction, "redes", "Cuerpo de Redes")
 
-@client.tree.command(name="postulacion_nexus", description="Postúlate al Cuerpo de Programación.")
+@client.tree.command(name="postulacion_nexus", description="Postúlate al Cuerpo de Programación (Nexus)")
 async def postulacion_nexus(interaction: discord.Interaction):
-    await enviar_postulacion(interaction, "nexus", "Cuerpo de Programación (Nexus)")
+    await manejar_postulacion_cmd(interaction, "nexus", "Cuerpo de Programación (Nexus)")
 
 
-# --- UTILIDADES Y JUEGOS ---
+# --- NUEVOS JUEGOS INTERACTIVOS ---
 
-@client.tree.command(name="dado", description="Lanza un dado interactivo")
-@app_commands.describe(caras="Número de caras del dado (por defecto 6)")
+@client.tree.command(name="dado", description="Lanza un dado de N caras")
+@app_commands.describe(caras="Número de caras (por defecto 6)")
 async def dado(interaction: discord.Interaction, caras: int = 6):
     if caras < 2:
-        await interaction.response.send_message("❌ El dado debe tener al menos 2 caras.", ephemeral=True)
-        return
+        return await interaction.response.send_message("❌ El dado debe tener al menos 2 caras.", ephemeral=True)
     resultado = random.randint(1, caras)
     await interaction.response.send_message(f"🎲 {interaction.user.mention} lanzó un dado de {caras} caras y salió: **{resultado}**")
+
+@client.tree.command(name="adivina_palabra", description="Juega a adivinar una palabra secreta por letras")
+async def adivina_palabra(interaction: discord.Interaction):
+    palabras = ["discord", "python", "railway", "programacion", "moderacion", "desarrollo", "servidor"]
+    palabra_secreta = random.choice(palabras)
+    letras_ocultas = ["_"] * len(palabra_secreta)
+    intentos = 6
+    letras_usadas = set()
+
+    await interaction.response.send_message(
+        f"🎮 **¡Adivina la Palabra!**\nPalabra: `{' '.join(letras_ocultas)}`\nTienes {intentos} intentos fallidos permitidos.\nEscribe una letra en el chat para empezar."
+    )
+
+    def check(m):
+        return m.author == interaction.user and m.channel == interaction.channel and len(m.content) == 1 and m.content.isalpha()
+
+    while intentos > 0 and "_" in letras_ocultas:
+        try:
+            msg = await client.wait_for('message', timeout=30.0, check=check)
+            letra = msg.content.lower()
+            try:
+                await msg.delete()
+            except:
+                pass
+
+            if letra in letras_usadas:
+                continue
+            letras_usadas.add(letra)
+
+            if letra in palabra_secreta:
+                for idx, l in enumerate(palabra_secreta):
+                    if l == letra:
+                        letras_ocultas[idx] = letra
+            else:
+                intentos -= 1
+
+            # Actualizar mensaje con el estado del juego
+            estado_actual = f"🎮 **¡Adivina la Palabra!**\nPalabra: `{' '.join(letras_ocultas)}`\nLetras usadas: {', '.join(letras_usadas)}\nIntentos restantes: {intentos}"
+            await interaction.edit_original_response(content=estado_actual)
+
+        except asyncio.TimeoutError:
+            return await interaction.edit_original_response(content=f"⏰ ¡Tiempo agotado! La palabra era **{palabra_secreta}**.")
+
+    if "_" not in letras_ocultas:
+        await interaction.edit_original_response(content=f"🎉 ¡Felicidades {interaction.user.mention}! Has adivinado la palabra secreta: **{palabra_secreta}**.")
+    else:
+        await interaction.edit_original_response(content=f"❌ ¡Te has quedado sin intentos! La palabra era **{palabra_secreta}**.")
+
+
+@client.tree.command(name="colgado", description="El clásico juego del ahorcado")
+async def colgado(interaction: discord.Interaction):
+    palabras_ahorcado = ["discord", "bot", "python", "desarrollo", "videojuego", "computadora"]
+    secreta = random.choice(palabras_ahorcado)
+    adivinadas = set()
+    fallos = 0
+    max_fallos = 6
+
+    def obtener_estado():
+        display = "".join([c if c in adivinadas else "_" for c in secreta])
+        return display
+
+    await interaction.response.send_message(
+        f"🕹️ **Juego del Colgado**\nProgreso: `{' '.join(obtener_estado())}`\nErrores: {fallos}/{max_fallos}\nEscribe una letra en el canal."
+    )
+
+    def check(m):
+        return m.author == interaction.user and m.channel == interaction.channel and len(m.content) == 1 and m.content.isalpha()
+
+    while fallos < max_fallos and "_" in obtener_estado():
+        try:
+            msg = await client.wait_for('message', timeout=25.0, check=check)
+            letra = msg.content.lower()
+            try:
+                await msg.delete()
+            except:
+                pass
+
+            if letra in adivinadas:
+                continue
+            adivinadas.add(letra)
+
+            if letra not in secreta:
+                fallos += 1
+
+            estado_txt = f"🕹️ **Juego del Colgado**\nProgreso: `{' '.join(obtener_estado())}`\nErrores: {fallos}/{max_fallos}\nLetras probadas: {', '.join(adivinadas)}"
+            await interaction.edit_original_response(content=estado_txt)
+        except asyncio.TimeoutError:
+            return await interaction.edit_original_response(content=f"⏰ ¡Se acabó el tiempo! La palabra era **{secreta}**.")
+
+    if "_" not in obtener_estado():
+        await interaction.edit_original_response(content=f"🏆 ¡Victoria! Has completado la palabra **{secreta}**.")
+    else:
+        await interaction.edit_original_response(content=f"💀 ¡Has perdido en el colgado! La palabra era **{secreta}**.")
+
 
 client.run(os.environ['DISCORD_TOKEN'])
