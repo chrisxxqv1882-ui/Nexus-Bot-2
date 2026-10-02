@@ -40,7 +40,6 @@ postulaciones_config = {
 
 class Bot(discord.Client):
     def __init__(self):
-        # Aseguramos los intents necesarios para menciones y contenido de mensajes
         intents = discord.Intents.default()
         intents.message_content = True
         super().__init__(intents=intents)
@@ -56,35 +55,45 @@ client = Bot()
 async def on_ready():
     print(f'¡Bot conectado con éxito como {client.user}!')
 
-# --- EVENTO: RESPUESTA AL MENCIONAR AL BOT ---
+# --- EVENTO: EMBED SÚPER COOL AL MENCIONAR AL BOT ---
 @client.event
 async def on_message(message):
     if message.author.bot:
         return
 
+    # Comprueba si el bot fue mencionado directamente en el texto del mensaje
     if client.user in message.mentions:
         embed = discord.Embed(
-            title="🤖 Hola, soy tu Bot de Postulaciones y Juegos",
-            description="Aquí tienes un mini resumen de todo lo que puedo hacer en tu servidor:",
-            color=0x3498DB
+            title="✨ ¡Hola! Soy Nexus Bot — Tu Centro de Control",
+            description="> *Sistema automatizado de gestión, postulaciones y entretenimiento para tu comunidad.*\n\nA continuación tienes un resumen completo de mis módulos activos:",
+            color=0x5865F2 # Color estilo Blurple de Discord
         )
+        
+        # Mini imagen destacada (avatar del bot) si la tiene
+        if client.user.avatar:
+            embed.set_thumbnail(url=client.user.avatar.url)
+
         embed.add_field(
-            name="⚙️ Configuración y Panel",
-            value="Usa `/configuracion` para definir los roles y personalizar los títulos, colores y preguntas de cada formulario.",
+            name="🛠️ Panel de Administración y Config",
+            value="• `/configuracion` ➜ Establece roles y personaliza títulos, colores y preguntas de los formularios al instante.",
             inline=False
         )
+        
         embed.add_field(
-            name="📝 Sistema de Postulaciones",
-            value="• `/postulacion_staff`\n• `/postulacion_casa-ally`\n• `/postulaicon_redes`\n• `/postulacion_nexus`\n*(Número único, avatar del candidato, respuestas y botones de revisión con notas).*",
+            name="📋 Sistema de Postulaciones Avanzado",
+            value="• `/postulacion_staff`\n• `/postulacion_casa-ally`\n• `/postulaicon_redes`\n• `/postulacion_nexus`\n*✨ Incluye numeración automática, avatar del candidato, modales interactivos y revisión con notas para el staff.*",
             inline=False
         )
+        
         embed.add_field(
-            name="🎮 Zona de Juegos e Interacción",
-            value="Disfruta libremente sin roles con `/juegos`, `/dado`, `/ppt`, `/trivia`, `/adivina_palabra` y `/colgado`.",
+            name="🎯 Zona de Juegos e Interacción (Libre)",
+            value="• `/juegos` • `/dado` • `/ppt` • `/trivia` • `/adivina_palabra` • `/colgado`\n*¡Diviértete sin restricciones ni roles especiales!*",
             inline=False
         )
-        embed.set_footer(text="¡Desarrollado a tu medida!")
-        await message.reply(embed=embed)
+
+        embed.set_footer(text=f"Solicitado por {message.author.display_name} • ¡Listo para servir!", icon_url=message.author.display_avatar.url)
+        
+        await message.channel.send(embed=embed)
 
 
 def verificar_permisos_comandos(interaction: discord.Interaction) -> bool:
