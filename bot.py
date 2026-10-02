@@ -350,8 +350,11 @@ class VistaRevisionPostulacion(discord.ui.View):
     rol_atencion="Rol que tendrá permisos para aprobar/rechazar postulaciones"
 )
 async def configuracion(interaction: discord.Interaction, rol_comandos: discord.Role = None, rol_atencion: discord.Role = None):
+    # Evita el error de "La aplicación no respondió" dando una respuesta diferida
+    await interaction.response.defer(ephemeral=True)
+
     if not interaction.user.guild_permissions.administrator:
-        return await interaction.response.send_message("❌ Solo un administrador puede usar este comando.", ephemeral=True)
+        return await interaction.followup.send("❌ Solo un administrador puede usar este comando.", ephemeral=True)
 
     texto_roles = ""
     if rol_comandos:
@@ -366,7 +369,7 @@ async def configuracion(interaction: discord.Interaction, rol_comandos: discord.
         description=f"Usa los botones de abajo para editar el diseño, preguntas y el embed de juegos.{texto_roles}",
         color=0x3498db
     )
-    await interaction.response.send_message(embed=embed, view=VistaConfiguracion(), ephemeral=True)
+    await interaction.followup.send(embed=embed, view=VistaConfiguracion(), ephemeral=True)
 
 async def enviar_anuncio_postulacion(interaction: discord.Interaction, tipo: str, miembro: discord.Member):
     if not verificar_permisos_comandos(interaction):
