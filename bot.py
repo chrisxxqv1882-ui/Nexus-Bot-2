@@ -4,18 +4,35 @@ import asyncio
 import discord
 from discord import app_commands
 
-# Configuración global del bot (Roles autorizados)
+# Configuración global del bot y de los embeds de formularios
 config_global = {
     "rol_comandos_id": None,  # Rol que puede usar los comandos de postulación
-    "rol_atencion_id": None   # Rol que puede aprobar/rechazar
+    "rol_atencion_id": None,   # Rol que puede aprobar/rechazar
+    "contador_postulaciones": 0 # Número consecutivo de postulaciones
 }
 
-# Base de datos en memoria para las preguntas de los formularios
+# Base de datos en memoria para las preguntas y el diseño de los formularios
 postulaciones_config = {
-    "staff": ["¿Cuál es tu edad?", "¿Por qué quieres ser Moderador?", "¿Tienes experiencia previa?"],
-    "ally": ["¿Cuál es tu servidor?", "¿Cuántos miembros activos tienes?", "¿Cuál es la invitación?"],
-    "redes": ["¿Qué plataformas manejas?", "¿Tienes ejemplos de ediciones o publicaciones?"],
-    "nexus": ["¿Qué lenguajes de programación conoces?", "¿Cuánto tiempo llevas programando?"]
+    "staff": {
+        "titulo": "📝 Postulación: Cuerpo de Moderación",
+        "color": 0x3498DB,
+        "preguntas": ["¿Cuál es tu edad?", "¿Por qué quieres ser Moderador?", "¿Tienes experiencia previa?"]
+    },
+    "ally": {
+        "titulo": "📝 Postulación: Casa Alianza",
+        "color": 0x2ECC71,
+        "preguntas": ["¿Cuál es tu servidor?", "¿Cuántos miembros activos tienes?", "¿Cuál es la invitación?"]
+    },
+    "redes": {
+        "titulo": "📝 Postulación: Cuerpo de Redes",
+        "color": 0x9B59B6,
+        "preguntas": ["¿Qué plataformas manejas?", "¿Tienes ejemplos de ediciones o publicaciones?"]
+    },
+    "nexus": {
+        "titulo": "📝 Postulación: Cuerpo de Programación",
+        "color": 0xE74C3C,
+        "preguntas": ["¿Qué lenguajes de programación conoces?", "¿Cuánto tiempo llevas programando?"]
+    }
 }
 
 class Bot(discord.Client):
@@ -51,28 +68,58 @@ def verificar_permisos_atencion(interaction: discord.Interaction) -> bool:
             return True
     return False
 
-# --- MODAL PARA EDITAR LAS PREGUNTAS ---
+# --- MODAL PARA EDITAR DISEÑO Y PREGUNTAS DEL FORMULARIO ---
 
-class ModalEditarPreguntas(discord.ui.Modal):
+class ModalConfigFormulario(discord.ui.Modal):
     def __init__(self, tipo: str, nombre_bonito: str):
         super().__init__(title=f"Configurar {nombre_bonito}")
         self.tipo = tipo
         
-        preguntas_actuales = "\n".join(postulaciones_config.get(tipo, []))
-        self.preguntas_input = discord.ui.TextInput(
-            label="Preguntas (escribe una por línea)",
+        cfg_actual = postulaciones_config.get(tipo, {})
+        preguntas_actuales = "\n".join(cfg_actual.get("preguntas", []))
+        color_actual_hex = f"#{cfg_actual.get('color', 3498335):06x}"
+
+        self.input_titulo = discord.ui.TextInput(
+            label="Título del Embed",
+            style=discord.TextStyle.short,
+            default=cfg_actual.get("titulo", ""),
+            required=True,
+            max_length=100
+        )
+        self.input_color = discord.ui.TextInput(
+            label="Color Hex (ej: #3498db)",
+            style=discord.TextStyle.short,
+            default=color_actual_hex,
+            required=True,
+            max_length=7
+        )
+        self.input_preguntas = discord.ui.TextInput(
+            label="Preguntas (una por línea)",
             style=discord.TextStyle.paragraph,
-            placeholder="Pregunta 1\nPregunta 2\nPregunta 3",
             default=preguntas_actuales,
             required=True,
             max_length=1000
         )
-        self.add_item(self.preguntas_input)
+
+        self.add_item(self.input_titulo)
+        self.add_item(self.input_color)
+        self.add_item(self.input_preguntas)
 
     async def on_submit(self, interaction: discord.Interaction):
-        nuevas_preguntas = [p.strip() for p in self.preguntas_input.value.split('\n') if p.strip()]
-        postulaciones_config[self.tipo] = nuevas_preguntas
-        await interaction.response.send_message(f"✅ ¡Formulario de **{self.tipo.upper()}** actualizado correctamente!", ephemeral=True)
+        try:
+            nuevo_color = int(self.input_color.value.strip().replace("#", ""), 16)
+        except:
+            return await interaction.response.send_message("❌ Código HEX de color inválido.", ephemeral=True)
+
+        nuevas_preguntas = [p.strip() for p in self.input_preguntas.value.split('\n') if p.strip()]
+        
+        postulaciones_config[self.tipo] = {
+            "titulo": self.input_titulo.value.strip(),
+            "color": nuevo_color,
+            "preguntas": nuevas_preguntas
+        }
+
+        await interaction.response.send_message(f"✅ ¡Formulario de **{self.tipo.upper()}** actualizado con éxito!", ephemeral=True)
 
 
 # --- VISTA DE CONFIGURACIÓN (BOTONES) ---
@@ -85,36 +132,37 @@ class VistaConfiguracion(discord.ui.View):
     async def btn_cfg_staff(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator:
             return await interaction.response.send_message("❌ Solo un administrador puede configurar esto.", ephemeral=True)
-        await interaction.response.send_modal(ModalEditarPreguntas("staff", "Cuerpo de Moderación"))
+        await interaction.response.send_modal(ModalConfigFormulario("staff", "Cuerpo de Moderación"))
 
     @discord.ui.button(label="📝 Config. Ally", style=discord.ButtonStyle.primary, row=0)
     async def btn_cfg_ally(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator:
             return await interaction.response.send_message("❌ Solo un administrador puede configurar esto.", ephemeral=True)
-        await interaction.response.send_modal(ModalEditarPreguntas("ally", "Casa Alianza"))
+        await interaction.response.send_modal(ModalConfigFormulario("ally", "Casa Alianza"))
 
     @discord.ui.button(label="📝 Config. Redes", style=discord.ButtonStyle.primary, row=1)
     async def btn_cfg_redes(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator:
             return await interaction.response.send_message("❌ Solo un administrador puede configurar esto.", ephemeral=True)
-        await interaction.response.send_modal(ModalEditarPreguntas("redes", "Cuerpo de Redes"))
+        await interaction.response.send_modal(ModalConfigFormulario("redes", "Cuerpo de Redes"))
 
     @discord.ui.button(label="📝 Config. Nexus", style=discord.ButtonStyle.primary, row=1)
     async def btn_cfg_nexus(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator:
             return await interaction.response.send_message("❌ Solo un administrador puede configurar esto.", ephemeral=True)
-        await interaction.response.send_modal(ModalEditarPreguntas("nexus", "Cuerpo de Programación"))
+        await interaction.response.send_modal(ModalConfigFormulario("nexus", "Cuerpo de Programación"))
 
 
 # --- MODAL DE RESPUESTAS DEL USUARIO ---
 
 class ModalResponderFormulario(discord.ui.Modal):
-    def __init__(self, tipo: str, nombre_bonito: str, preguntas: list, miembro_postulado: discord.Member):
-        super().__init__(title=f"Postulación: {nombre_bonito}")
+    def __init__(self, tipo: str, num_id: int, preguntas: list, miembro_postulado: discord.Member, config_form: dict):
+        super().__init__(title=f"Postulación #{num_id}")
         self.tipo = tipo
-        self.nombre_bonito = nombre_bonito
+        self.num_id = num_id
         self.preguntas = preguntas
         self.miembro_postulado = miembro_postulado
+        self.config_form = config_form
         self.inputs = []
 
         for i, pregunta in enumerate(preguntas[:5]):
@@ -134,10 +182,12 @@ class ModalResponderFormulario(discord.ui.Modal):
             respuestas_texto += f"**P{i+1}: {pregunta}**\n↳ {self.inputs[i].value}\n\n"
 
         embed = discord.Embed(
-            title=f"📝 Postulación: {self.nombre_bonito}",
+            title=f"{self.config_form['titulo']} (#{self.num_id})",
             description=f"👤 **Postulante:** {self.miembro_postulado.mention} (`{self.miembro_postulado}`)\n\n{respuestas_texto}",
-            color=0xF1C40F
+            color=self.config_form['color']
         )
+        # Mostrar el avatar del postulante en la imagen chica (thumbnail)
+        embed.set_thumbnail(url=self.miembro_postulado.display_avatar.url)
         embed.set_footer(text=f"Enviado por {interaction.user} | Esperando revisión del Staff.")
 
         await interaction.message.edit(embed=embed, view=VistaRevisionPostulacion(self.miembro_postulado))
@@ -147,16 +197,17 @@ class ModalResponderFormulario(discord.ui.Modal):
 # --- VISTA INICIAL PARA EL USUARIO ---
 
 class VistaBotonResponder(discord.ui.View):
-    def __init__(self, tipo: str, nombre_bonito: str, preguntas: list, miembro_postulado: discord.Member):
+    def __init__(self, tipo: str, num_id: int, preguntas: list, miembro_postulado: discord.Member, config_form: dict):
         super().__init__(timeout=None)
         self.tipo = tipo
-        self.nombre_bonito = nombre_bonito
+        self.num_id = num_id
         self.preguntas = preguntas
         self.miembro_postulado = miembro_postulado
+        self.config_form = config_form
 
     @discord.ui.button(label="✍️ Responder Formulario", style=discord.ButtonStyle.success, custom_id="btn_responder_form")
     async def responder(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ModalResponderFormulario(self.tipo, self.nombre_bonito, self.preguntas, self.miembro_postulado))
+        await interaction.response.send_modal(ModalResponderFormulario(self.tipo, self.num_id, self.preguntas, self.miembro_postulado, self.config_form))
 
 
 # --- MODAL PARA ESCRIBIR LA NOTA DEL STAFF ---
@@ -242,50 +293,57 @@ async def configuracion(interaction: discord.Interaction, rol_comandos: discord.
 
     embed = discord.Embed(
         title="⚙️ Configuración del Bot",
-        description=f"Usa los botones de abajo para editar las preguntas de cada formulario.{texto_roles}",
+        description=f"Usa los botones de abajo para editar el diseño y preguntas de cada formulario.{texto_roles}",
         color=0x3498db
     )
     await interaction.response.send_message(embed=embed, view=VistaConfiguracion(), ephemeral=True)
 
-async def enviar_anuncio_postulacion(interaction: discord.Interaction, tipo: str, nombre: str, miembro: discord.Member):
+async def enviar_anuncio_postulacion(interaction: discord.Interaction, tipo: str, miembro: discord.Member):
     if not verificar_permisos_comandos(interaction):
         return await interaction.response.send_message("❌ No tienes el rol autorizado para ejecutar comandos de postulación.", ephemeral=True)
 
-    preguntas = postulaciones_config.get(tipo, [])
+    config_form = postulaciones_config.get(tipo, {})
+    preguntas = config_form.get("preguntas", [])
     if not preguntas:
         return await interaction.response.send_message(
-            f"❌ El formulario de **{nombre}** aún no ha sido configurado. Un administrador debe usar el comando `/configuracion`.",
+            f"❌ Este formulario aún no ha sido configurado. Un administrador debe usar el comando `/configuracion`.",
             ephemeral=True
         )
 
-    embed = discord.Embed(
-        title=f"📝 Postulación Abierta: {nombre}",
-        description=f"Candidato: {miembro.mention}\nIniciado por: {interaction.user.mention}\nHaz clic en el botón de abajo para rellenar tus respuestas.",
-        color=0x3498DB
-    )
+    # Incrementar el número consecutivo de la postulación
+    config_global["contador_postulaciones"] += 1
+    num_id = config_global["contador_postulaciones"]
 
-    await interaction.channel.send(embed=embed, view=VistaBotonResponder(tipo, nombre, preguntas, miembro))
-    await interaction.response.send_message("✅ ¡Formulario enviado al chat público!", ephemeral=True)
+    embed = discord.Embed(
+        title=f"{config_form['titulo']} (#{num_id})",
+        description=f"Candidato: {miembro.mention}\nIniciado por: {interaction.user.mention}\nHaz clic en el botón de abajo para rellenar tus respuestas.",
+        color=config_form['color']
+    )
+    # Mostrar el avatar del candidato como thumbnail
+    embed.set_thumbnail(url=miembro.display_avatar.url)
+
+    await interaction.channel.send(embed=embed, view=VistaBotonResponder(tipo, num_id, preguntas, miembro, config_form))
+    await interaction.response.send_message(f"✅ ¡Formulario `#{num_id}` enviado al chat público!", ephemeral=True)
 
 @client.tree.command(name="postulacion_staff", description="Inicia el formulario para el Cuerpo de Moderación")
 @app_commands.describe(miembro="¿Qué usuario va a aplicar el formulario?")
 async def postulacion_staff(interaction: discord.Interaction, miembro: discord.Member):
-    await enviar_anuncio_postulacion(interaction, "staff", "Cuerpo de Moderación", miembro)
+    await enviar_anuncio_postulacion(interaction, "staff", miembro)
 
 @client.tree.command(name="postulacion_casa-ally", description="Inicia el formulario para Casa Alianza")
 @app_commands.describe(miembro="¿Qué usuario va a aplicar el formulario?")
 async def postulacion_casa_ally(interaction: discord.Interaction, miembro: discord.Member):
-    await enviar_anuncio_postulacion(interaction, "ally", "Casa Alianza", miembro)
+    await enviar_anuncio_postulacion(interaction, "ally", miembro)
 
 @client.tree.command(name="postulaicon_redes", description="Inicia el formulario para el Cuerpo de Redes")
 @app_commands.describe(miembro="¿Qué usuario va a aplicar el formulario?")
 async def postulaicon_redes(interaction: discord.Interaction, miembro: discord.Member):
-    await enviar_anuncio_postulacion(interaction, "redes", "Cuerpo de Redes", miembro)
+    await enviar_anuncio_postulacion(interaction, "redes", miembro)
 
 @client.tree.command(name="postulacion_nexus", description="Inicia el formulario para el Cuerpo de Programación")
 @app_commands.describe(miembro="¿Qué usuario va a aplicar el formulario?")
 async def postulacion_nexus(interaction: discord.Interaction, miembro: discord.Member):
-    await enviar_anuncio_postulacion(interaction, "nexus", "Cuerpo de Programación (Nexus)", miembro)
+    await enviar_anuncio_postulacion(interaction, "nexus", miembro)
 
 
 # --- JUEGOS INTERACTIVOS (LIBRES PARA TODOS) ---
