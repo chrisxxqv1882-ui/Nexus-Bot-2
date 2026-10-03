@@ -11,10 +11,12 @@ config_global = {
     "prefijo": "a¡",
     "rol_comandos_id": None,  
     "rol_atencion_id": None,   
+    "rol_organizar_eventos_id": None, # Nuevo: Rol autorizado para organizar eventos
+    "rol_aprobar_sugerencias_id": None, # Nuevo: Rol autorizado para aprobar/rechazar sugerencias
     "canal_logs_id": None,     
     "canal_sanciones_id": None, 
     "canal_tickets_id": None,  
-    "canal_sugerencias_id": None, # Nuevo: ID del canal de sugerencias automáticas
+    "canal_sugerencias_id": None, 
     "contador_postulaciones": 0, 
     "antispam_activo": True,
     "antispam_limite_mensajes": 5,
@@ -132,8 +134,14 @@ class VistaSugerenciaStaff(discord.ui.View):
 
     @discord.ui.button(label="✅ Aprobar", style=discord.ButtonStyle.success, custom_id="btn_aprobar_sugerencia")
     async def aprobar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not interaction.user.guild_permissions.manage_guild and not interaction.user.guild_permissions.administrator:
-            return await interaction.response.send_message("❌ Solo el staff puede evaluar sugerencias.", ephemeral=True)
+        rol_requerido_id = config_global["rol_aprobar_sugerencias_id"]
+        tiene_permiso = interaction.user.guild_permissions.administrator
+        if not tiene_permiso and rol_requerido_id:
+            rol = interaction.guild.get_role(rol_requerido_id)
+            if rol and rol in interaction.user.roles: tiene_permiso = True
+
+        if not tiene_permiso:
+            return await interaction.response.send_message("❌ No tienes el rol autorizado para aprobar sugerencias.", ephemeral=True)
 
         for child in self.children: child.disabled = True
         embed = interaction.message.embeds[0]
@@ -144,15 +152,26 @@ class VistaSugerenciaStaff(discord.ui.View):
         try:
             usuario = interaction.guild.get_member(self.autor_id)
             if usuario:
-                await usuario.send(embed=discord.Embed(title="💡 Sugerencia Aprobada", description=f"¡Tu sugerencia en **{interaction.guild.name}** ha sido **APROBADA**!", color=discord.Color.green()))
+                embed_md = discord.Embed(
+                    title="💡 Sugerencia Aprobada",
+                    description=f"¡Tu sugerencia en **{interaction.guild.name}** ha sido **APROBADA**!\n\n**Sugerencia original:**\n{embed.description}",
+                    color=discord.Color.green()
+                )
+                await usuario.send(embed=embed_md)
         except: pass
 
         await interaction.response.send_message("✅ Sugerencia aprobada correctamente.", ephemeral=True)
 
     @discord.ui.button(label="❌ Rechazar", style=discord.ButtonStyle.danger, custom_id="btn_rechazar_sugerencia")
     async def rechazar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not interaction.user.guild_permissions.manage_guild and not interaction.user.guild_permissions.administrator:
-            return await interaction.response.send_message("❌ Solo el staff puede evaluar sugerencias.", ephemeral=True)
+        rol_requerido_id = config_global["rol_aprobar_sugerencias_id"]
+        tiene_permiso = interaction.user.guild_permissions.administrator
+        if not tiene_permiso and rol_requerido_id:
+            rol = interaction.guild.get_role(rol_requerido_id)
+            if rol and rol in interaction.user.roles: tiene_permiso = True
+
+        if not tiene_permiso:
+            return await interaction.response.send_message("❌ No tienes el rol autorizado para rechazar sugerencias.", ephemeral=True)
 
         for child in self.children: child.disabled = True
         embed = interaction.message.embeds[0]
@@ -163,7 +182,12 @@ class VistaSugerenciaStaff(discord.ui.View):
         try:
             usuario = interaction.guild.get_member(self.autor_id)
             if usuario:
-                await usuario.send(embed=discord.Embed(title="💡 Sugerencia Rechazada", description=f"Lamentamos informarte que tu sugerencia en **{interaction.guild.name}** ha sido **rechazada**.", color=discord.Color.red()))
+                embed_md = discord.Embed(
+                    title="💡 Sugerencia Rechazada",
+                    description=f"Lamentamos informarte que tu sugerencia en **{interaction.guild.name}** ha sido **rechazada**.\n\n**Sugerencia original:**\n{embed.description}",
+                    color=discord.Color.red()
+                )
+                await usuario.send(embed=embed_md)
         except: pass
 
         await interaction.response.send_message("❌ Sugerencia rechazada.", ephemeral=True)
@@ -179,16 +203,11 @@ async def on_message(message):
     if canal_sugerencias_id and message.channel.id == canal_sugerencias_id:
         try:
             await message.delete()
-            embed = discord.Embed(
-                title="💡 Nueva Sugerencia",
-                description=message.content,
-                color=0x3498DB
-            )
+            embed = discord.Embed(title="💡 Nueva Sugerencia", description=message.content, color=0x3498DB)
             embed.set_author(name=message.author.display_name, icon_url=message.author.display_avatar.url)
             embed.set_footer(text=f"ID de usuario: {message.author.id}")
 
             nuevo_msg = await message.channel.send(embed=embed, view=VistaSugerenciaStaff(message.author.id))
-            # Añadir reacciones predeterminadas si se desea
             await nuevo_msg.add_reaction("👍")
             await nuevo_msg.add_reaction("👎")
         except Exception as e:
@@ -222,8 +241,37 @@ async def on_message(message):
 
 
 # ==========================================
-# 🎨 EDITOR VISUAL Y CONFIGURACIÓN GENERAL
+# ⚙️ CONFIGURACIÓN GENERAL (EMBED CON ROLES Y CANALES)
 # ==========================================
+
+class ModalConfigGeneral(discord.ui.Modal, title="⚙️ Configuración General del Servidor"):
+    input_prefijo = discord.ui.TextInput(label="Prefijo del Bot", default=config_global["prefijo"], required=True, max_length=5)
+    rol_evento_id = discord.ui.TextInput(label="ID Rol Organizar Eventos", default=str(config_global["rol_organizar_eventos_id"] or ""), required=False, max_length=20)
+    rol_sugerencia_id = discord.ui.TextInput(label="ID Rol Aprobar Sugerencias", default=str(config_global["rol_aprobar_sugerencias_id"] or ""), required=False, max_length=20)
+    canal_sancion_id = discord.ui.TextInput(label="ID Canal Logs de Sanciones", default=str(config_global["canal_sanciones_id"] or ""), required=False, max_length=20)
+    canal_sugerencia_id = discord.ui.TextInput(label="ID Canal de Sugerencias", default=str(config_global["canal_sugerencias_id"] or ""), required=False, max_length=20)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            config_global["prefijo"] = self.input_prefijo.value.strip()
+            config_global["rol_organizar_eventos_id"] = int(self.rol_evento_id.value.strip()) if self.rol_evento_id.value.strip() else None
+            config_global["rol_aprobar_sugerencias_id"] = int(self.rol_sugerencia_id.value.strip()) if self.rol_sugerencia_id.value.strip() else None
+            config_global["canal_sanciones_id"] = int(self.canal_sancion_id.value.strip()) if self.canal_sancion_id.value.strip() else None
+            config_global["canal_sugerencias_id"] = int(self.canal_sugerencia_id.value.strip()) if self.canal_sugerencia_id.value.strip() else None
+
+            embed_resumen = discord.Embed(
+                title="✅ ¡Configuración General Actualizada!",
+                description="Se han guardado correctamente los roles y canales del sistema:",
+                color=discord.Color.green()
+            )
+            embed_resumen.add_field(name="👑 Rol Organizar Eventos", value=f"<@&{config_global['rol_organizar_eventos_id']}>" if config_global['rol_organizar_eventos_id'] else "No configurado", inline=True)
+            embed_resumen.add_field(name="💡 Rol Aprobar Sugerencias", value=f"<@&{config_global['rol_aprobar_sugerencias_id']}>" if config_global['rol_aprobar_sugerencias_id'] else "No configurado", inline=True)
+            embed_resumen.add_field(name="📢 Canal Sugerencias", value=f"<#{config_global['canal_sugerencias_id']}>" if config_global['canal_sugerencias_id'] else "No configurado", inline=False)
+
+            await interaction.response.send_message(embed=embed_resumen, ephemeral=True)
+        except ValueError:
+            await interaction.response.send_message("❌ Error: Asegúrate de ingresar IDs numéricos válidos en los campos correspondientes.", ephemeral=True)
+
 
 class ModalEditarPanelTicket(discord.ui.Modal, title="Editar Panel Principal de Tickets"):
     titulo = discord.ui.TextInput(label="Título del Embed", default=config_global["ticket_titulo"], required=True, max_length=100)
@@ -245,33 +293,17 @@ class ModalEditarPanelTicket(discord.ui.Modal, title="Editar Panel Principal de 
         await interaction.response.send_message("✅ ¡Panel de tickets actualizado con éxito!", ephemeral=True)
 
 
-class ModalConfigGeneral(discord.ui.Modal, title="Configuración General y Canales"):
-    input_prefijo = discord.ui.TextInput(label="Prefijo del Bot", default=config_global["prefijo"], required=True, max_length=5)
-    rol_atc_id = discord.ui.TextInput(label="ID Rol Staff (Atender Tickets)", default=str(config_global["rol_atencion_id"] or ""), required=False, max_length=20)
-    canal_sanciones_id = discord.ui.TextInput(label="ID Canal Logs de Sanciones", default=str(config_global["canal_sanciones_id"] or ""), required=False, max_length=20)
-    canal_sugerencias_id = discord.ui.TextInput(label="ID Canal de Sugerencias Automáticas", default=str(config_global["canal_sugerencias_id"] or ""), required=False, max_length=20)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            config_global["prefijo"] = self.input_prefijo.value.strip()
-            config_global["rol_atencion_id"] = int(self.rol_atc_id.value.strip()) if self.rol_atc_id.value.strip() else None
-            config_global["canal_sanciones_id"] = int(self.canal_sanciones_id.value.strip()) if self.canal_sanciones_id.value.strip() else None
-            config_global["canal_sugerencias_id"] = int(self.canal_sugerencias_id.value.strip()) if self.canal_sugerencias_id.value.strip() else None
-
-            await interaction.response.send_message("✅ ¡Configuración general guardada con éxito!", ephemeral=True)
-        except ValueError:
-            await interaction.response.send_message("❌ Error: Asegúrate de ingresar IDs numéricos válidos.", ephemeral=True)
-
-
 @client.tree.command(name="configuracion", description="Panel visual interactivo para tickets")
 async def configuracion(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
     await interaction.response.send_modal(ModalEditarPanelTicket())
 
 
-@client.tree.command(name="confi-general", description="Configura prefijo, rol staff, canal de sanciones y canal de sugerencias")
+@client.tree.command(name="confi-general", description="Abre el panel de configuración de roles y canales generales")
 async def confi_general(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("❌ Solo los administradores pueden usar este comando.", ephemeral=True)
+    
     await interaction.response.send_modal(ModalConfigGeneral())
 
 
@@ -346,8 +378,14 @@ class VistaEventoParticipar(discord.ui.View):
     mencion="Rol a pingo avisar (ej: @everyone)"
 )
 async def organizar_evento(interaction: discord.Interaction, nombre: str, canal: discord.TextChannel, texto: str, organizadores: str, tiempo: str, ganadores: str, mencion: str = ""):
-    if not interaction.user.guild_permissions.manage_events and not interaction.user.guild_permissions.administrator:
-        return await interaction.response.send_message("❌ No tienes permisos para organizar eventos.", ephemeral=True)
+    rol_req_id = config_global["rol_organizar_eventos_id"]
+    tiene_permiso = interaction.user.guild_permissions.manage_events or interaction.user.guild_permissions.administrator
+    if not tiene_permiso and rol_req_id:
+        rol = interaction.guild.get_role(rol_req_id)
+        if rol and rol in interaction.user.roles: tiene_permiso = True
+
+    if not tiene_permiso:
+        return await interaction.response.send_message("❌ No tienes el rol autorizado para organizar eventos.", ephemeral=True)
 
     embed = discord.Embed(title=f"📅 ¡Evento: {nombre}!", description=texto, color=0xE91E63)
     embed.add_field(name="👑 Organizadores", value=organizadores, inline=False)
@@ -413,8 +451,14 @@ class VistaSelectorEventos(discord.ui.View):
 
 @client.tree.command(name="iniciar-evento", description="Selecciona un evento activo y envía el aviso de inicio con ping")
 async def iniciar_evento(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.manage_events and not interaction.user.guild_permissions.administrator:
-        return await interaction.response.send_message("❌ No tienes permisos.", ephemeral=True)
+    rol_req_id = config_global["rol_organizar_eventos_id"]
+    tiene_permiso = interaction.user.guild_permissions.manage_events or interaction.user.guild_permissions.administrator
+    if not tiene_permiso and rol_req_id:
+        rol = interaction.guild.get_role(rol_req_id)
+        if rol and rol in interaction.user.roles: tiene_permiso = True
+
+    if not tiene_permiso:
+        return await interaction.response.send_message("❌ No tienes permisos para iniciar eventos.", ephemeral=True)
     if not eventos_activos:
         return await interaction.response.send_message("🛡️ No hay ningún evento activo para iniciar.", ephemeral=True)
 
