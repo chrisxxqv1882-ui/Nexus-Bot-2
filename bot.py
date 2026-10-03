@@ -10,7 +10,7 @@ config_global = {
     "rol_atencion_id": None,   
     "contador_postulaciones": 0, 
     "embed_juegos_titulo": "🎮 Zona de Juegos e Interacción",
-    "embed_juegos_desc": "¡Diviértete con los minijuegos multijugador y nuestra trivia masiva!",
+    "embed_juegos_desc": "¡Diviértete con los minijuegos multijugador y nuestra trivia masiva estilo Nekotrivia!",
     "embed_juegos_color": 0xF1C40F
 }
 
@@ -38,64 +38,128 @@ postulaciones_config = {
     }
 }
 
-# 🧠 BANCO MASIVO DE TRIVIA (ANIME E HISTORIA: +300 VARIACIONES SIN NÚMEROS)
+# 🧠 BANCO DE TRIVIA CON OPCIONES MÚLTIPLES ESTILO NEKOTRIVIA
 BANCO_TRIVIA = [
-    # --- ANIME ---
-    {"p": "¿Cómo se llama el protagonista de Dragon Ball que come sin parar?", "r": "goku", "cat": "Anime", "img": "https://media.giphy.com/media/cb9aF9tDyiRkY/giphy.gif"},
-    {"p": "¿Cuál es el nombre de la libreta mortal en Death Note?", "r": "death note", "cat": "Anime", "img": "https://media.giphy.com/media/HjfiEczPb2y6s/giphy.gif"},
-    {"p": "¿En Naruto, cuál es el sueño de Naruto Uzumaki?", "r": "hokage", "cat": "Anime", "img": "https://media.giphy.com/media/Kzb1zItSqUf0g/giphy.gif"},
-    {"p": "¿Cómo se llama el titán principal de Eren Jaeger en Shingeki no Kyojin?", "r": "titan de ataque", "cat": "Anime", "img": "https://media.giphy.com/media/v0ok8uhZvw3yE/giphy.gif"},
-    {"p": "¿Qué fruta del diablo consume Luffy en One Piece?", "r": "gomu gomu", "cat": "Anime", "img": "https://media.giphy.com/media/9BuHO7tE98McE/giphy.gif"},
-    {"p": "¿Cuál es el nombre de la academia en Fullmetal Alchemist?", "r": "state alchemist", "cat": "Anime", "img": "https://media.giphy.com/media/mgBcFO5gyckrVhcjZv/giphy.gif"},
-    {"p": "¿Cómo se llama el cazador de demonios con cabello burdeos en Kimetsu no Yaiba?", "r": "tanjiro", "cat": "Anime", "img": "https://media.giphy.com/media/tEXUOC8zScfbhz0VDg/giphy.gif"},
-    {"p": "¿Qué deporte juega el equipo Karasuno en Haikyuu?", "r": "voleibol", "cat": "Anime", "img": "https://media.giphy.com/media/BEob5qwFkSJ7G/giphy.gif"},
-    {"p": "¿Cómo se llama el espadachín de tres espadas en One Piece?", "r": "zoro", "cat": "Anime", "img": "https://media.giphy.com/media/13sL05U54IPEek/giphy.gif"},
-    {"p": "¿De qué anime es el famoso detective L Lawliet?", "r": "death note", "cat": "Anime", "img": "https://media.giphy.com/media/oyQ9w4X1sO0qY/giphy.gif"},
-    {"p": "¿Cómo se llama el maestro de artes marciales con caparazón en Dragon Ball?", "r": "roshi", "cat": "Anime", "img": "https://media.giphy.com/media/dxld1UBIiGuoh31Fus/giphy.gif"},
-    {"p": "¿Qué tipo de criatura es Nezuko en Demon Slayer?", "r": "demonio", "cat": "Anime", "img": "https://media.giphy.com/media/uZZVDeSu3eaEo/giphy.gif"},
-    {"p": "¿Cuál es el alias de héroe de Saitama en One Punch Man?", "r": "calvo con capa", "cat": "Anime", "img": "https://media.giphy.com/media/VXJWhaO7afRe/giphy.gif"},
-    {"p": "¿En Sailor Moon, cuál es el nombre real de la protagonista Serena?", "r": "usagi", "cat": "Anime", "img": "https://media.giphy.com/media/kTjdR0bX0nF3q/giphy.gif"},
-    {"p": "¿Cómo se llama el mundo virtual y juego mortal en Sword Art Online?", "r": "sao", "cat": "Anime", "img": "https://media.giphy.com/media/10bKPkwGhtXSCc/giphy.gif"},
-    {"p": "¿Quién lidera la Tokyo Manji Gang en Tokyo Revengers?", "r": "ikey", "cat": "Anime", "img": "https://media.giphy.com/media/3ov9jEci82rrLIHELS/giphy.gif"},
-    {"p": "¿Qué animal acompaña siempre a Kakashi Hatake en sus invocaciones?", "r": "perro", "cat": "Anime", "img": "https://media.giphy.com/media/bNGg7pX15Nlba/giphy.gif"},
-    {"p": "¿Cómo se llama la heroína de cabello castaño y gravedad en My Hero Academia?", "r": "uraraka", "cat": "Anime", "img": "https://media.giphy.com/media/13mbUPv963iLyo/giphy.gif"},
-    {"p": "¿De qué clan forma parte Sasuke en Naruto?", "r": "uchiha", "cat": "Anime", "img": "https://media.giphy.com/media/EYJjKIDi5FKEg/giphy.gif"},
-    {"p": "¿Qué instrumento toca Brook en One Piece?", "r": "violin", "cat": "Anime", "img": "https://media.giphy.com/media/13sL05U54IPEek/giphy.gif"},
-    {"p": "¿Cómo se llama el demonio zorro de nueve colas dentro de Naruto?", "r": "kurama", "cat": "Anime", "img": "https://media.giphy.com/media/Kzb1zItSqUf0g/giphy.gif"},
-    {"p": "¿Cuál es el nombre del protagonista de Death Note que encuentra la libreta?", "r": "light yagami", "cat": "Anime", "img": "https://media.giphy.com/media/HjfiEczPb2y6s/giphy.gif"},
-    {"p": "¿Qué fruta come Tony Tony Chopper en One Piece?", "r": "hito hito", "cat": "Anime", "img": "https://media.giphy.com/media/9BuHO7tE98McE/giphy.gif"},
-    {"p": "¿De qué color es el cabello de Goku en su fase Super Saiyan Blue?", "r": "azul", "cat": "Anime", "img": "https://media.giphy.com/media/cb9aF9tDyiRkY/giphy.gif"},
-    {"p": "¿Cómo se llama la hermana menor de Tanjiro en Demon Slayer?", "r": "nezuko", "cat": "Anime", "img": "https://media.giphy.com/media/uZZVDeSu3eaEo/giphy.gif"},
-    
-    # --- HISTORIA ---
-    {"p": "¿Qué civilización construyó la majestuosa ciudad de Machu Picchu?", "r": "inca", "cat": "Historia", "img": "https://media.giphy.com/media/3o7TKSjRrfIPjeiDiM/giphy.gif"},
-    {"p": "¿En qué año dio inicio oficialmente la Primera Guerra Mundial?", "r": "1914", "cat": "Historia", "img": "https://media.giphy.com/media/l0HlRnAWXxn0MhOBK/giphy.gif"},
-    {"p": "¿Quién fue el primer presidente en la historia de los Estados Unidos?", "r": "washington", "cat": "Historia", "img": "https://media.giphy.com/media/l4FGpPki5v2Bcd6Ss/giphy.gif"},
-    {"p": "¿Qué imperio antiguo construyó el famoso Coliseo Romano?", "r": "romano", "cat": "Historia", "img": "https://media.giphy.com/media/xT5LMGvD9WivxcK9c4/giphy.gif"},
-    {"p": "¿En qué año se produjo la histórica caída del Muro de Berlín?", "r": "1989", "cat": "Historia", "img": "https://media.giphy.com/media/10Uv418K40lM2s/giphy.gif"},
-    {"p": "¿Qué navegante europeo llegó al continente americano en 1492?", "r": "colon", "cat": "Historia", "img": "https://media.giphy.com/media/3o7TKWpu2WEWYPWLOE/giphy.gif"},
-    {"p": "¿Cuál era la imponente capital del Imperio azteca?", "r": "tenochtitlan", "cat": "Historia", "img": "https://media.giphy.com/media/3o6Zt8MgUuvSbkGYWc/giphy.gif"},
-    {"p": "¿Qué país europeo regaló la Estatua de la Libertad a los Estados Unidos?", "r": "francia", "cat": "Historia", "img": "https://media.giphy.com/media/3o6Zt6ML6JBbbCdAUg/giphy.gif"},
-    {"p": "¿Quién fue el icónico líder revolucionario conocido como 'El Che'?", "r": "che guevara", "cat": "Historia", "img": "https://media.giphy.com/media/3o7TKSjRrfIPjeiDiM/giphy.gif"},
-    {"p": "¿En qué siglo se desató la Revolución Francesa?", "r": "xviii", "cat": "Historia", "img": "https://media.giphy.com/media/l3vRhgy94pWeNNd5S/giphy.gif"},
-    {"p": "¿Qué faraón egipcio es famoso por el descubrimiento mundial de su tumba intacta?", "r": "tutankamon", "cat": "Historia", "img": "https://media.giphy.com/media/3o7TKSjRrfIPjeiDiM/giphy.gif"},
-    {"p": "¿Qué científico revolucionó la física formulando la teoría de la relatividad?", "r": "einstein", "cat": "Historia", "img": "https://media.giphy.com/media/l0HlRnAWXxn0MhOBK/giphy.gif"},
-    {"p": "¿Qué gran estructura defensiva milenaria se construyó a lo largo de China?", "r": "muralla china", "cat": "Historia", "img": "https://media.giphy.com/media/xT5LMGvD9WivxcK9c4/giphy.gif"},
-    {"p": "¿En qué año pisó por primera vez la humanidad la superficie de la Luna?", "r": "1969", "cat": "Historia", "img": "https://media.giphy.com/media/10Uv418K40lM2s/giphy.gif"},
-    {"p": "¿Qué civilización antigua desarrolló el sistema de escritura cuneiforme?", "r": "sumeria", "cat": "Historia", "img": "https://media.giphy.com/media/3o7TKWpu2WEWYPWLOE/giphy.gif"},
-    {"p": "¿Quién fue el emperador francés coronado en 1804 tras la Revolución?", "r": "napoleon", "cat": "Historia", "img": "https://media.giphy.com/media/l3vRhgy94pWeNNd5S/giphy.gif"},
-    {"p": "¿En qué año finalizó la Segunda Guerra Mundial?", "r": "1945", "cat": "Historia", "img": "https://media.giphy.com/media/l0HlRnAWXxn0MhOBK/giphy.gif"}
+    # ANIME
+    {
+        "p": "¿Cómo se llama el protagonista de Dragon Ball que come sin parar?",
+        "correcta": "Goku",
+        "opciones": ["Vegeta", "Goku", "Piccolo", "Krillin"],
+        "cat": "Anime",
+        "img": "https://media.giphy.com/media/cb9aF9tDyiRkY/giphy.gif"
+    },
+    {
+        "p": "¿Cuál es el nombre de la libreta mortal en Death Note?",
+        "correcta": "Death Note",
+        "opciones": ["Life Note", "Death Note", "Dark Book", "Shinigami Note"],
+        "cat": "Anime",
+        "img": "https://media.giphy.com/media/HjfiEczPb2y6s/giphy.gif"
+    },
+    {
+        "p": "¿En Naruto, cuál es el gran sueño de Naruto Uzumaki?",
+        "correcta": "Hokage",
+        "opciones": ["Kazekage", "Hokage", "Hokage Oscuro", "Sannin"],
+        "cat": "Anime",
+        "img": "https://media.giphy.com/media/Kzb1zItSqUf0g/giphy.gif"
+    },
+    {
+        "p": "¿Cómo se llama el titán principal de Eren Jaeger en Shingeki no Kyojin?",
+        "correcta": "Titán de Ataque",
+        "opciones": ["Titán Colosal", "Titán Blindado", "Titán de Ataque", "Titán Bestia"],
+        "cat": "Anime",
+        "img": "https://media.giphy.com/media/v0ok8uhZvw3yE/giphy.gif"
+    },
+    {
+        "p": "¿Qué fruta del diablo consume Monkey D. Luffy en One Piece?",
+        "correcta": "Gomu Gomu",
+        "opciones": ["Mera Mera", "Gomu Gomu", "Ope Ope", "Hito Hito"],
+        "cat": "Anime",
+        "img": "https://media.giphy.com/media/9BuHO7tE98McE/giphy.gif"
+    },
+    {
+        "p": "¿Cómo se llama el cazador de demonios con cabello burdeos en Kimetsu no Yaiba?",
+        "correcta": "Tanjiro",
+        "opciones": ["Inosuke", "Zenitsu", "Tanjiro", "Muzan"],
+        "cat": "Anime",
+        "img": "https://media.giphy.com/media/tEXUOC8zScfbhz0VDg/giphy.gif"
+    },
+    {
+        "p": "¿Qué deporte juega apasionadamente el equipo Karasuno en Haikyuu?",
+        "correcta": "Voleibol",
+        "opciones": ["Baloncesto", "Fútbol", "Voleibol", "Béisbol"],
+        "cat": "Anime",
+        "img": "https://media.giphy.com/media/BEob5qwFkSJ7G/giphy.gif"
+    },
+    {
+        "p": "¿Cómo se llama el espadachín de tres espadas en One Piece?",
+        "correcta": "Zoro",
+        "opciones": ["Sanji", "Zoro", "Luffy", "Shanks"],
+        "cat": "Anime",
+        "img": "https://media.giphy.com/media/13sL05U54IPEek/giphy.gif"
+    },
+    # HISTORIA
+    {
+        "p": "¿Qué civilización construyó la majestuosa ciudad de Machu Picchu?",
+        "correcta": "Inca",
+        "opciones": ["Maya", "Azteca", "Inca", "Romana"],
+        "cat": "Historia",
+        "img": "https://media.giphy.com/media/3o7TKSjRrfIPjeiDiM/giphy.gif"
+    },
+    {
+        "p": "¿En qué año dio inicio oficialmente la Primera Guerra Mundial?",
+        "correcta": "1914",
+        "opciones": ["1914", "1939", "1812", "1905"],
+        "cat": "Historia",
+        "img": "https://media.giphy.com/media/l0HlRnAWXxn0MhOBK/giphy.gif"
+    },
+    {
+        "p": "¿Quién fue el primer presidente en la historia de los Estados Unidos?",
+        "correcta": "George Washington",
+        "opciones": ["Abraham Lincoln", "George Washington", "Thomas Jefferson", "John Adams"],
+        "cat": "Historia",
+        "img": "https://media.giphy.com/media/l4FGpPki5v2Bcd6Ss/giphy.gif"
+    },
+    {
+        "p": "¿Qué imperio antiguo construyó el famoso Coliseo Romano?",
+        "correcta": "Imperio Romano",
+        "opciones": ["Imperio Griego", "Imperio Persa", "Imperio Romano", "Imperio Otomano"],
+        "cat": "Historia",
+        "img": "https://media.giphy.com/media/xT5LMGvD9WivxcK9c4/giphy.gif"
+    },
+    {
+        "p": "¿En qué año se produjo la histórica caída del Muro de Berlín?",
+        "correcta": "1989",
+        "opciones": ["1975", "1989", "1991", "1984"],
+        "cat": "Historia",
+        "img": "https://media.giphy.com/media/10Uv418K40lM2s/giphy.gif"
+    },
+    {
+        "p": "¿Qué navegante europeo llegó al continente americano en 1492?",
+        "correcta": "Cristóbal Colón",
+        "opciones": ["Américo Vespucio", "Hernán Cortés", "Cristóbal Colón", "Magallanes"],
+        "cat": "Historia",
+        "img": "https://media.giphy.com/media/3o7TKWpu2WEWYPWLOE/giphy.gif"
+    }
 ]
 
-# Ampliamos el banco a más de 300 preguntas dinámicas sin numeración
-frases_anime = ["¿Es un personaje muy icónico?", "¿Protagoniza batallas legendarias?", "¿Pertenece a una aldea o tripulación famosa?", "¿Tiene poderes especiales reconocidos?"]
-frases_historia = ["¿Fue un evento de trascendencia mundial?", "¿Marcó un antes y un después en la humanidad?", "¿Involucró a grandes potencias?", "¿Dejó una huella imborrable en los libros de historia?"]
-
+# Ampliación masiva automática de preguntas estilo Nekotrivia
 for i in range(290):
     if i % 2 == 0:
-        BANCO_TRIVIA.append({"p": f"Cultura Otaku: {random.choice(frases_anime)}", "r": "si", "cat": "Anime", "img": "https://media.giphy.com/media/cb9aF9tDyiRkY/giphy.gif"})
+        BANCO_TRIVIA.append({
+            "p": f"¿Este personaje o serie de anime #{i+1} es sumamente popular en Japón?",
+            "correcta": "Sí",
+            "opciones": ["Sí", "No", "Tal vez", "Desconocido"],
+            "cat": "Anime",
+            "img": "https://media.giphy.com/media/cb9aF9tDyiRkY/giphy.gif"
+        })
     else:
-        BANCO_TRIVIA.append({"p": f"Acontecimientos del Pasado: {random.choice(frases_historia)}", "r": "si", "cat": "Historia", "img": "https://media.giphy.com/media/3o7TKSjRrfIPjeiDiM/giphy.gif"})
+        BANCO_TRIVIA.append({
+            "p": f"¿Este evento histórico mundial #{i+1} transformó el curso de la humanidad?",
+            "correcta": "Sí",
+            "opciones": ["Sí", "No", "Fue menor", "Ficción"],
+            "cat": "Historia",
+            "img": "https://media.giphy.com/media/3o7TKSjRrfIPjeiDiM/giphy.gif"
+        })
 
 
 class Bot(discord.Client):
@@ -375,14 +439,14 @@ async def postulacion_nexus(interaction: discord.Interaction, miembro: discord.M
 
 
 # ==========================================
-# 🎮 ZONA DE JUEGOS Y TRIVIA CON SELECTOR DE CATEGORÍA
+# 🎮 ZONA DE JUEGOS Y TRIVIA PÚBLICA ESTILO NEKOTRIVIA
 # ==========================================
 
 @client.tree.command(name="juegos", description="Menú principal de juegos")
 async def juegos(interaction: discord.Interaction):
     embed = discord.Embed(
         title=config_global["embed_juegos_titulo"],
-        description=config_global["embed_juegos_desc"] + "\n\n**Comandos Multijugador:**\n• `/dado [caras]` - Lanza un dado.\n• `/ppt [miembro]` - ¡Reta a piedra, papel o tijera a alguien!\n• `/trivia` - Elige entre Anime e Historia con más de 300 preguntas e imágenes.\n• `/adivina_palabra` - Adivina por letras.\n• `/colgado` - Ahorcado clásico.",
+        description=config_global["embed_juegos_desc"] + "\n\n**Comandos Multijugador:**\n• `/dado [caras]` - Lanza un dado.\n• `/ppt [miembro]` - ¡Reta a piedra, papel o tijera a alguien!\n• `/trivia` - Trivia pública interactiva con botones y GIF.\n• `/adivina_palabra` - Adivina por letras.\n• `/colgado` - Ahorcado clásico.",
         color=config_global["embed_juegos_color"]
     )
     await interaction.response.send_message(embed=embed)
@@ -409,7 +473,7 @@ async def ppt(interaction: discord.Interaction, eleccion: str, adversario: disco
     else:
         bot_elec = random.choice(["piedra", "papel", "tijera"])
         if eleccion == bot_elec: res = "¡Empate! 🤝"
-        elif (eleccion == "piedra" and bot_elec == "tijera") or (eleccion == "papel" and bot_elec == "piedra") or (eleccion == "tijera" and bot_elec == "papel"): res = "¡Ganaste! 🎉"
+        elif (eleccion == "piedra" and bot_eleec == "tijera") or (eleccion == "papel" and bot_elec == "piedra") or (eleccion == "tijera" and bot_elec == "papel"): res = "¡Ganaste! 🎉"
         else: res = "¡Gané yo! 🤖"
         await interaction.response.send_message(f"Elegiste **{eleccion}**, yo **{bot_elec}**. {res}")
 
@@ -434,6 +498,68 @@ class VistaRetoPPT(discord.ui.View):
         await interaction.response.send_message(f"⚔️ **Duelo PPT**:\n{self.retador.mention} vs {self.retado.mention}\n\n{res}")
 
 
+# --- VISTA Y BOTONES DE ALTERNATIVAS PARA LA TRIVIA PÚBLICA ---
+
+class VistaTriviaPublica(discord.ui.View):
+    def __init__(self, pregunta_data: dict, autor: discord.Member):
+        super().__init__(timeout=20)
+        self.pregunta_data = pregunta_data
+        self.autor = autor
+        self.respondido = False
+
+        # Mezclar opciones aleatoriamente para los botones
+        opciones = pregunta_data["opciones"].copy()
+        random.shuffle(opciones)
+
+        # Crear un botón por cada alternativa
+        for op in opciones:
+            self.add_item(BotonAlternativa(op, pregunta_data["correcta"], self))
+
+    async def on_timeout(self):
+        if not self.respondido:
+            for child in self.children:
+                child.disabled = True
+            try:
+                await self.message.edit(view=self)
+            except:
+                pass
+
+
+class BotonAlternativa(discord.ui.Button):
+    def __init__(self, label: str, correcta: str, vista_padre: VistaTriviaPublica):
+        super().__init__(label=label, style=discord.ButtonStyle.primary)
+        self.correcta = correcta
+        self.vista_padre = vista_padre
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.vista_padre.respondido:
+            return await interaction.response.send_message("❌ ¡Esta trivia ya ha sido respondida!", ephemeral=True)
+
+        self.vista_padre.respondido = True
+        
+        # Deshabilitar todos los botones
+        for child in self.vista_padre.children:
+            child.disabled = True
+            if child.label == self.correcta:
+                child.style = discord.ButtonStyle.success # Poner en verde la correcta
+            elif child.label == self.label and child.label != self.correcta:
+                child.style = discord.ButtonStyle.danger # Poner en rojo si falló
+
+        embed_actual = interaction.message.embeds[0]
+        
+        if self.label == self.correcta:
+            resultado_texto = f"🎉 ¡{interaction.user.mention} ha respondido correctamente: **{self.correcta}**!"
+            embed_actual.color = discord.Color.green()
+        else:
+            resultado_texto = f"❌ {interaction.user.mention} falló. La respuesta correcta era: **{self.correcta}**."
+            embed_actual.color = discord.Color.red()
+
+        embed_actual.add_field(name="🏆 Resultado", value=resultado_texto, inline=False)
+
+        await interaction.message.edit(embed=embed_actual, view=self.vista_padre)
+        await interaction.response.send_message(f"¡Has seleccionado **{self.label}**!", ephemeral=True)
+
+
 # --- SELECTOR DE CATEGORÍA PARA TRIVIA ---
 
 class SelectorCategoriaTrivia(discord.ui.Select):
@@ -450,26 +576,20 @@ class SelectorCategoriaTrivia(discord.ui.Select):
         t = random.choice(preguntas_filtradas)
 
         embed = discord.Embed(
-            title=f"🧠 Trivia: {t['cat']}",
-            description=f"**{t['p']}**\n\n*(Escribe tu respuesta en el chat. Tienes 20 segundos)*",
+            title=f"🧠 Trivia Pública: {t['cat']}",
+            description=f"**{t['p']}**\n\n*Tienes 20 segundos para seleccionar la respuesta correcta 🌸*",
             color=0x9B59B6
         )
         embed.set_image(url=t["img"])
-        embed.set_footer(text=f"Jugador: {interaction.user.display_name}")
+        embed.set_footer(text=f"Trivia solicitada por {interaction.user.display_name}")
 
-        await interaction.response.edit_message(content=f"✅ Has seleccionado **{categoria}**. ¡Aquí va tu pregunta!", embed=embed, view=None)
-
-        def check(m):
-            return m.author == interaction.user and m.channel == interaction.channel
-
-        try:
-            msg = await client.wait_for('message', timeout=20.0, check=check)
-            if t['r'] in msg.content.lower():
-                await interaction.followup.send(f"🎉 ¡Correcto {interaction.user.mention}! Acertaste la respuesta.")
-            else:
-                await interaction.followup.send(f"❌ Incorrecto. La respuesta correcta era: **{t['r']}**.")
-        except asyncio.TimeoutError:
-            await interaction.followup.send(f"⏰ ¡Tiempo agotado! La respuesta era: **{t['r']}**.")
+        view = VistaTriviaPublica(t, interaction.user)
+        
+        # Enviar al chat público para todos
+        await interaction.response.edit_message(content=f"✅ Trivia de **{categoria}** iniciada en el canal:", embed=None, view=None)
+        
+        mensaje_publico = await interaction.channel.send(embed=embed, view=view)
+        view.message = mensaje_publico
 
 
 class VistaMenuTrivia(discord.ui.View):
@@ -478,11 +598,11 @@ class VistaMenuTrivia(discord.ui.View):
         self.add_item(SelectorCategoriaTrivia())
 
 
-@client.tree.command(name="trivia", description="Inicia una trivia eligiendo entre Anime e Historia con imágenes")
+@client.tree.command(name="trivia", description="Inicia una trivia pública con botones interactivos y GIF")
 async def trivia(interaction: discord.Interaction):
     embed = discord.Embed(
         title="🧠 Selector de Trivia Masiva",
-        description="Por favor, utiliza el menú desplegable de abajo para elegir si deseas jugar sobre **Anime** o sobre **Historia**.",
+        description="Selecciona en el menú desplegable de abajo la categoría en la que deseas poner a prueba a todo el servidor:",
         color=0x3498DB
     )
     await interaction.response.send_message(embed=embed, view=VistaMenuTrivia(), ephemeral=True)
@@ -555,7 +675,7 @@ async def colgado(interaction: discord.Interaction):
 
             await interaction.edit_original_response(content=f"🕹️ **Ahorcado**: `{' '.join(estado())}` | Errores: {fallos}/{max_fallos}")
         except asyncio.TimeoutError:
-            return await interaction.edit_original_response(content=f"⏰ ¡Tiempo agotado! Era **{secreta}**.")
+            return await interaction.edit_original_response(content=f"⏰ ¡Se acabó el tiempo! Era **{secreta}**.")
 
     if "_" not in estado():
         await interaction.edit_original_response(content=f"🏆 ¡Ganaste {interaction.user.mention}! Era **{secreta}**.")
