@@ -10,10 +10,10 @@ from discord import app_commands
 config_global = {
     "prefijo": "a¡",
     "rol_comandos_id": None,  
-    "rol_atencion_id": None,   
+    "rol_atencion_id": None,   # Rol autorizado para atender tickets y ser mencionado
     "rol_organizar_eventos_id": None, 
     "rol_aprobar_sugerencias_id": None, 
-    "canal_logs_id": None,     
+    "canal_logs_id": None,     # Canal de logs para postulaciones
     "canal_sanciones_id": None, 
     "canal_tickets_id": None,  
     "canal_sugerencias_id": None, 
@@ -25,14 +25,36 @@ config_global = {
     "antibots_activo": True,
     # Configuración del panel de tickets principal
     "ticket_titulo": "🎟️ Sistema de Soporte y Tickets",
-    "ticket_desc": "Haz clic en el botón inferior para abrir un ticket privado con el staff.",
+    "ticket_desc": "Selecciona una categoría en el menú desplegable inferior para abrir tu ticket privado con el staff.",
     "ticket_color": 0x5865F2,
-    "ticket_boton_texto": "🎫 Abrir Ticket",
     "ticket_imagen": "", 
-    # Configuración del embed de bienvenida dentro del ticket
-    "ticket_bienvenida_titulo": "🎫 Ticket de Soporte Abierto",
-    "ticket_bienvenida_desc": "Hola $(user.mention), el staff te atenderá pronto.\nExplica tu duda detalladamente.",
-    "ticket_bienvenida_color": 0x2ECC71,
+    # Opciones del Menú Desplegable con su propio mensaje de bienvenida personalizado
+    "ticket_opciones": [
+        {
+            "label": "Soporte General", 
+            "emoji": "🎫", 
+            "desc": "Preguntas o dudas generales del servidor",
+            "bienvenida_titulo": "🎫 Ticket de Soporte General",
+            "bienvenida_desc": "Hola $(user.mention), el staff general te atenderá pronto.\nExplica tu duda detalladamente.",
+            "bienvenida_color": 0x2ECC71
+        },
+        {
+            "label": "Reportes a Usuarios", 
+            "emoji": "🛡️", 
+            "desc": "Reportar a un usuario o miembro del staff",
+            "bienvenida_titulo": "🛡️ Ticket de Reporte",
+            "bienvenida_desc": "Hola $(user.mention), por favor aporta pruebas (capturas o IDs) del reporte.",
+            "bienvenida_color": 0xE74C3C
+        },
+        {
+            "label": "Postulaciones / Alianzas", 
+            "emoji": "🤝", 
+            "desc": "Consultas sobre alianzas o postulaciones",
+            "bienvenida_titulo": "🤝 Ticket de Alianzas",
+            "bienvenida_desc": "Hola $(user.mention), deja los datos de tu servidor o postulación aquí.",
+            "bienvenida_color": 0x9B59B6
+        }
+    ],
     "ticket_bienvenida_imagen": "", 
     "embed_juegos_titulo": "🎮 Zona de Juegos e Interacción",
     "embed_juegos_desc": "¡Diviértete con los minijuegos multijugador y nuestra trivia masiva estilo Nekotrivia!",
@@ -43,26 +65,27 @@ registro_antispam = defaultdict(list)
 base_datos_sanciones = defaultdict(list)
 eventos_activos = {} 
 
+# CONFIGURACIÓN COMPLETA DE POSTULACIONES
 postulaciones_config = {
     "staff": {
         "titulo": "📝 Postulación: Cuerpo de Moderación",
         "color": 0x3498DB,
-        "preguntas": ["¿Cuál es tu edad?", "¿Por qué quieres ser Moderador?", "¿Tienes experiencia previa?"]
+        "preguntas": ["¿Cuál es tu edad?", "¿Por qué quieres ser Moderador?", "¿Tienes experiencia previa moderando servidores?"]
     },
     "ally": {
         "titulo": "📝 Postulación: Casa Alianza",
         "color": 0x2ECC71,
-        "preguntas": ["¿Cuál es tu servidor?", "¿Cuántos miembros activos tienes?", "¿Cuál es la invitación?"]
+        "preguntas": ["¿Cuál es el nombre y temática de tu servidor?", "¿Cuántos miembros activos tienes?", "¿Cuál es el link de invitación permanente?"]
     },
     "redes": {
         "titulo": "📝 Postulación: Cuerpo de Redes",
         "color": 0x9B59B6,
-        "preguntas": ["¿Qué plataformas manejas?", "¿Tienes ejemplos de ediciones o publicaciones?"]
+        "preguntas": ["¿Qué plataformas manejas (TikTok, Instagram, Twitter)?", "¿Tienes ejemplos de ediciones, videos o publicaciones previas?"]
     },
     "nexus": {
         "titulo": "📝 Postulación: Cuerpo de Programación",
         "color": 0xE74C3C,
-        "preguntas": ["¿Qué lenguajes de programación conoces?", "¿Cuánto tiempo llevas programando?"]
+        "preguntas": ["¿Qué lenguajes de programación conoces (Python, JavaScript, etc.)?", "¿Cuánto tiempo llevas programando bots o sistemas?"]
     }
 }
 
@@ -238,7 +261,7 @@ async def on_message(message):
 
 
 # ==========================================
-# ⚙️ /CONFI-GENERAL EN EMBED INTERACTIVO (SIN FORMULARIOS MOLESTOS)
+# ⚙️ /CONFI-GENERAL EN EMBED INTERACTIVO
 # ==========================================
 
 class VistaBotonConfigGeneral(discord.ui.View):
@@ -254,6 +277,15 @@ class VistaBotonConfigGeneral(discord.ui.View):
                 await i.response.send_message(f"✅ Prefijo actualizado a: `{config_global['prefijo']}`", ephemeral=True)
         await interaction.response.send_modal(M())
 
+    @discord.ui.button(label="🙋‍♂️ Rol Atención Tickets", style=discord.ButtonStyle.secondary, row=0)
+    async def set_rolatencion(self, interaction: discord.Interaction, button: discord.ui.Button):
+        class M(discord.ui.Modal, title="Configurar Rol Atención Tickets"):
+            v = discord.ui.TextInput(label="ID del Rol", default=str(config_global["rol_atencion_id"] or ""), max_length=20)
+            async def on_submit(self, i: discord.Interaction):
+                config_global["rol_atencion_id"] = int(self.v.value.strip()) if self.v.value.strip() else None
+                await i.response.send_message(f"✅ Rol de atención de tickets actualizado.", ephemeral=True)
+        await interaction.response.send_modal(M())
+
     @discord.ui.button(label="👑 Rol Eventos", style=discord.ButtonStyle.secondary, row=0)
     async def set_rolevento(self, interaction: discord.Interaction, button: discord.ui.Button):
         class M(discord.ui.Modal, title="Configurar Rol Eventos"):
@@ -263,7 +295,7 @@ class VistaBotonConfigGeneral(discord.ui.View):
                 await i.response.send_message(f"✅ Rol de eventos actualizado.", ephemeral=True)
         await interaction.response.send_modal(M())
 
-    @discord.ui.button(label="💡 Rol Sugerencias", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="💡 Rol Sugerencias", style=discord.ButtonStyle.secondary, row=1)
     async def set_rolsug(self, interaction: discord.Interaction, button: discord.ui.Button):
         class M(discord.ui.Modal, title="Configurar Rol Sugerencias"):
             v = discord.ui.TextInput(label="ID del Rol", default=str(config_global["rol_aprobar_sugerencias_id"] or ""), max_length=20)
@@ -290,6 +322,24 @@ class VistaBotonConfigGeneral(discord.ui.View):
                 await i.response.send_message(f"✅ Canal de sugerencias actualizado.", ephemeral=True)
         await interaction.response.send_modal(M())
 
+    @discord.ui.button(label="📋 Canal Postulaciones (Logs)", style=discord.ButtonStyle.primary, row=2)
+    async def set_canallogs(self, interaction: discord.Interaction, button: discord.ui.Button):
+        class M(discord.ui.Modal, title="Configurar Canal Logs Postulaciones"):
+            v = discord.ui.TextInput(label="ID del Canal", default=str(config_global["canal_logs_id"] or ""), max_length=20)
+            async def on_submit(self, i: discord.Interaction):
+                config_global["canal_logs_id"] = int(self.v.value.strip()) if self.v.value.strip() else None
+                await i.response.send_message(f"✅ Canal de postulaciones actualizado.", ephemeral=True)
+        await interaction.response.send_modal(M())
+
+    @discord.ui.button(label="🎫 Canal Panel Tickets", style=discord.ButtonStyle.success, row=2)
+    async def set_canalticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        class M(discord.ui.Modal, title="Configurar Canal Panel Tickets"):
+            v = discord.ui.TextInput(label="ID del Canal", default=str(config_global["canal_tickets_id"] or ""), max_length=20)
+            async def on_submit(self, i: discord.Interaction):
+                config_global["canal_tickets_id"] = int(self.v.value.strip()) if self.v.value.strip() else None
+                await i.response.send_message(f"✅ Canal de tickets actualizado.", ephemeral=True)
+        await interaction.response.send_modal(M())
+
 
 @client.tree.command(name="confi-general", description="Panel visual en Embed para configurar roles y canales")
 async def confi_general(interaction: discord.Interaction):
@@ -298,47 +348,125 @@ async def confi_general(interaction: discord.Interaction):
 
     embed = discord.Embed(
         title="⚙️ Panel de Configuración General",
-        description="Haz clic en los botones inferiores para editar cada parámetro individualmente de forma visual:",
+        description="Haz clic en los botones inferiores para editar cada parámetro individualmente:",
         color=0x3498DB
     )
     embed.add_field(name="📌 Prefijo actual", value=f"`{config_global['prefijo']}`", inline=True)
+    embed.add_field(name="🙋‍♂️ Rol Atención Tickets", value=f"<@&{config_global['rol_atencion_id']}>" if config_global['rol_atencion_id'] else "No configurado", inline=True)
     embed.add_field(name="👑 Rol Organizar Eventos", value=f"<@&{config_global['rol_organizar_eventos_id']}>" if config_global['rol_organizar_eventos_id'] else "No configurado", inline=True)
     embed.add_field(name="💡 Rol Aprobar Sugerencias", value=f"<@&{config_global['rol_aprobar_sugerencias_id']}>" if config_global['rol_aprobar_sugerencias_id'] else "No configurado", inline=True)
     embed.add_field(name="🛡️ Canal Sanciones", value=f"<#{config_global['canal_sanciones_id']}>" if config_global['canal_sanciones_id'] else "No configurado", inline=True)
     embed.add_field(name="📢 Canal Sugerencias", value=f"<#{config_global['canal_sugerencias_id']}>" if config_global['canal_sugerencias_id'] else "No configurado", inline=True)
+    embed.add_field(name="📋 Canal Postulaciones", value=f"<#{config_global['canal_logs_id']}>" if config_global['canal_logs_id'] else "No configurado", inline=True)
+    embed.add_field(name="🎫 Canal Panel Tickets", value=f"<#{config_global['canal_tickets_id']}>" if config_global['canal_tickets_id'] else "No configurado", inline=True)
 
     await interaction.response.send_message(embed=embed, view=VistaBotonConfigGeneral(), ephemeral=True)
 
 
 # ==========================================
-# 🎫 /CONFIGURACION (EMBED PRINCIPAL DE TICKETS EDITABLE EN TIEMPO REAL)
+# 📋 SISTEMA DE POSTULACIONES PÚBLICAS Y POR MD
+# ==========================================
+
+class VistaComenzarPostulacion(discord.ui.View):
+    def __init__(self, tipo, num_id, preguntas, miembro_postulado, config_form):
+        super().__init__(timeout=None)
+        self.tipo, self.num_id, self.preguntas, self.miembro_postulado, self.config_form = tipo, num_id, preguntas, miembro_postulado, config_form
+
+    @discord.ui.button(label="🚀 Comenzar Postulación", style=discord.ButtonStyle.success)
+    async def comenzar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.miembro_postulado.id:
+            return await interaction.response.send_message("❌ Este formulario no es para ti.", ephemeral=True)
+        
+        await interaction.response.send_message("📬 ¡Cuestionario abierto en tus **Mensajes Privados (MD)**!", ephemeral=True)
+        try:
+            respuestas = []
+            for i, preg in enumerate(self.preguntas):
+                await self.miembro_postulado.send(embed=discord.Embed(title=f"Pregunta {i+1} de {len(self.preguntas)}", description=preg, color=self.config_form['color']))
+                msg = await client.wait_for('message', timeout=120.0, check=lambda m: m.author.id == self.miembro_postulado.id and isinstance(m.channel, discord.DMChannel))
+                respuestas.append((preg, msg.content))
+            
+            txt = "".join([f"**{p}**\n↳ {r}\n\n" for p, r in respuestas])
+            embed_final = discord.Embed(
+                title=f"{self.config_form['titulo']} (#{self.num_id})", 
+                description=f"👤 **Candidato:** {self.miembro_postulado.mention}\n\n{txt}", 
+                color=self.config_form['color']
+            )
+            
+            destino = interaction.guild.get_channel(config_global["canal_logs_id"]) if config_global["canal_logs_id"] else interaction.channel
+            if destino: 
+                await destino.send(embed=embed_final)
+            
+            await self.miembro_postulado.send("🎉 ¡Postulación completada y enviada al staff con éxito!")
+        except Exception as e:
+            try:
+                await self.miembro_postulado.send("❌ La postulación ha expirado o ha ocurrido un error.")
+            except: pass
+
+
+@client.tree.command(name="postulacion", description="Envía un panel público para que un usuario se postule")
+async def postulacion(interaction: discord.Interaction, miembro: discord.Member):
+    if not interaction.user.guild_permissions.administrator and not interaction.user.guild_permissions.manage_guild:
+        return await interaction.response.send_message("❌ No tienes permisos para iniciar postulaciones.", ephemeral=True)
+
+    v = discord.ui.View(timeout=60)
+    s = discord.ui.Select(
+        placeholder="Elige el tipo de postulación...", 
+        options=[
+            discord.SelectOption(label="Staff (Moderación)", value="staff", emoji="📝", description="Postulación para moderador"),
+            discord.SelectOption(label="Casa Alianza", value="ally", emoji="🤝", description="Postulación para alianza"),
+            discord.SelectOption(label="Cuerpo de Redes", value="redes", emoji="🎨", description="Postulación para diseñadores/redes"),
+            discord.SelectOption(label="Cuerpo de Programación", value="nexus", emoji="💻", description="Postulación para devs")
+        ]
+    )
+    
+    async def cb(i):
+        tipo_sel = s.values[0]
+        cfg = postulaciones_config.get(tipo_sel, {})
+        config_global["contador_postulaciones"] += 1
+        num_id = config_global["contador_postulaciones"]
+        
+        embed_panel = discord.Embed(
+            title=cfg['titulo'],
+            description=f"Candidato: {miembro.mention}\nHaz clic en el botón inferior para responder las preguntas en tus **Mensajes Privados (MD)**.",
+            color=cfg['color']
+        )
+        await i.channel.send(embed=embed_panel, view=VistaComenzarPostulacion(tipo_sel, num_id, cfg["preguntas"], miembro, cfg))
+        await i.response.edit_message(content=f"✅ Panel de postulación creado para {miembro.mention}.", embed=None, view=None)
+
+    s.callback = cb
+    v.add_item(s)
+    await interaction.response.send_message(embed=discord.Embed(title="📋 Seleccionar Postulación", description=f"Elige el tipo de postulación para {miembro.mention}:"), view=v, ephemeral=True)
+
+
+# ==========================================
+# 🎫 /CONFIGURACION (EDITOR EMBED DE TICKETS + BIENVENIDAS POR OPCIÓN)
 # ==========================================
 
 class VistaEditorEmbedTicket(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=120)
 
-    @discord.ui.button(label="✏️️ Título", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="✏ Título Panel", style=discord.ButtonStyle.secondary, row=0)
     async def ed_titulo(self, interaction: discord.Interaction, button: discord.ui.Button):
-        class M(discord.ui.Modal, title="Editar Título del Ticket"):
+        class M(discord.ui.Modal, title="Editar Título del Panel"):
             v = discord.ui.TextInput(label="Título", default=config_global["ticket_titulo"], max_length=100)
             async def on_submit(self, i: discord.Interaction):
                 config_global["ticket_titulo"] = self.v.value.strip()
                 await i.response.send_message("✅ Título actualizado.", ephemeral=True)
         await interaction.response.send_modal(M())
 
-    @discord.ui.button(label="📄 Descripción", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="📄 Descripción Panel", style=discord.ButtonStyle.secondary, row=0)
     async def ed_desc(self, interaction: discord.Interaction, button: discord.ui.Button):
-        class M(discord.ui.Modal, title="Editar Descripción"):
+        class M(discord.ui.Modal, title="Editar Descripción del Panel"):
             v = discord.ui.TextInput(label="Descripción", style=discord.TextStyle.paragraph, default=config_global["ticket_desc"], max_length=1000)
             async def on_submit(self, i: discord.Interaction):
                 config_global["ticket_desc"] = self.v.value.strip()
                 await i.response.send_message("✅ Descripción actualizada.", ephemeral=True)
         await interaction.response.send_modal(M())
 
-    @discord.ui.button(label="🎨 Color Hex", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="🎨 Color Panel", style=discord.ButtonStyle.secondary, row=0)
     async def ed_color(self, interaction: discord.Interaction, button: discord.ui.Button):
-        class M(discord.ui.Modal, title="Editar Color Hex"):
+        class M(discord.ui.Modal, title="Editar Color Hex del Panel"):
             v = discord.ui.TextInput(label="Color (ej: #5865F2)", default=f"#{config_global['ticket_color']:06x}", max_length=7)
             async def on_submit(self, i: discord.Interaction):
                 try: config_global["ticket_color"] = int(self.v.value.strip().replace("#", ""), 16)
@@ -346,26 +474,44 @@ class VistaEditorEmbedTicket(discord.ui.View):
                 await i.response.send_message("✅ Color actualizado.", ephemeral=True)
         await interaction.response.send_modal(M())
 
-    @discord.ui.button(label="🖼️ Imagen / Banner", style=discord.ButtonStyle.primary, row=1)
+    @discord.ui.button(label="🖼️ Imagen Panel", style=discord.ButtonStyle.primary, row=1)
     async def ed_img(self, interaction: discord.Interaction, button: discord.ui.Button):
-        class M(discord.ui.Modal, title="Editar URL de Imagen"):
+        class M(discord.ui.Modal, title="Editar URL de Imagen del Panel"):
             v = discord.ui.TextInput(label="URL de la imagen", default=config_global["ticket_imagen"], required=False, max_length=500)
             async def on_submit(self, i: discord.Interaction):
                 config_global["ticket_imagen"] = self.v.value.strip()
                 await i.response.send_message("✅ Imagen actualizada.", ephemeral=True)
         await interaction.response.send_modal(M())
 
-    @discord.ui.button(label="🔘 Texto Botón", style=discord.ButtonStyle.secondary, row=1)
-    async def ed_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        class M(discord.ui.Modal, title="Editar Botón"):
-            v = discord.ui.TextInput(label="Texto del botón", default=config_global["ticket_boton_texto"], max_length=80)
+    @discord.ui.button(label="📂 Opciones y Bienvenidas", style=discord.ButtonStyle.success, row=1)
+    async def ed_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
+        class M(discord.ui.Modal, title="Configurar Opciones y Bienvenidas"):
+            txt = discord.ui.TextInput(
+                label="Formato por línea:", 
+                style=discord.TextStyle.paragraph, 
+                default="\n".join([f"{o['label']}|{o['emoji']}|{o['desc']}|{o['bienvenida_titulo']}|{o['bienvenida_desc']}" for o in config_global["ticket_opciones"]]), 
+                placeholder="Nombre|Emoji|Desc|TituloBienvenida|DescBienvenida",
+                max_length=3000
+            )
             async def on_submit(self, i: discord.Interaction):
-                config_global["ticket_boton_texto"] = self.v.value.strip()
-                await i.response.send_message("✅ Botón actualizado.", ephemeral=True)
+                nuevas = []
+                for linea in self.txt.value.split("\n"):
+                    p = [x.strip() for x in linea.split("|")]
+                    if len(p) >= 5:
+                        nuevas.append({
+                            "label": p[0], "emoji": p[1], "desc": p[2],
+                            "bienvenida_titulo": p[3], "bienvenida_desc": p[4],
+                            "bienvenida_color": 0x2ECC71
+                        })
+                if nuevas:
+                    config_global["ticket_opciones"] = nuevas
+                    await i.response.send_message("✅ ¡Opciones y mensajes de bienvenida actualizados!", ephemeral=True)
+                else:
+                    await i.response.send_message("❌ Formato incorrecto. Asegúrate de separar con |", ephemeral=True)
         await interaction.response.send_modal(M())
 
 
-@client.tree.command(name="configuracion", description="Visualiza y edita en vivo el Embed principal de Tickets")
+@client.tree.command(name="configuracion", description="Visualiza y edita en vivo el Embed principal de Tickets y Opciones")
 async def configuracion(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
@@ -377,13 +523,20 @@ async def configuracion(interaction: discord.Interaction):
     )
     if config_global["ticket_imagen"]:
         embed_preview.set_image(url=config_global["ticket_imagen"])
+    
+    for idx, o in enumerate(config_global["ticket_opciones"]):
+        embed_preview.add_field(
+            name=f"{o['emoji']} {o['label']}", 
+            value=f"**Desc:** {o['desc']}\n**Bienvenida:** {o['bienvenida_titulo']}", 
+            inline=False
+        )
     embed_preview.set_footer(text="Vista previa en tiempo real del Panel de Tickets")
 
     await interaction.response.send_message(embed=embed_preview, view=VistaEditorEmbedTicket(), ephemeral=True)
 
 
 # ==========================================
-# 🎫 SISTEMA DE TICKETS (CON RECLAMACIÓN)
+# 🎫 SISTEMA DE TICKETS (CON MENÚ, BIENVENIDA Y ROL DE ATENCIÓN)
 # ==========================================
 
 class VistaTicketActivo(discord.ui.View):
@@ -413,12 +566,21 @@ class VistaTicketActivo(discord.ui.View):
         except: pass
 
 
-class VistaCrearTicket(discord.ui.View):
-    def __init__(self): super().__init__(timeout=None)
+class SelectorOpcionesTicket(discord.ui.Select):
+    def __init__(self):
+        options = []
+        for op in config_global["ticket_opciones"]:
+            options.append(discord.SelectOption(label=op["label"], emoji=op["emoji"], description=op["desc"]))
+        super().__init__(placeholder="📂 Selecciona una categoría de ticket...", min_values=1, max_values=1, options=options)
 
-    @discord.ui.button(label=config_global["ticket_boton_texto"], style=discord.ButtonStyle.success, custom_id="btn_abrir_ticket_rt")
-    async def abrir(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def callback(self, interaction: discord.Interaction):
         guild = interaction.guild
+        seleccion_label = self.values[0]
+        
+        opcion_data = next((o for o in config_global["ticket_opciones"] if o["label"] == seleccion_label), None)
+        if not opcion_data:
+            return await interaction.response.send_message("❌ Opción no encontrada.", ephemeral=True)
+
         cat = discord.utils.get(guild.categories, name="Tickets")
         if not cat: 
             try: cat = await guild.create_category("Tickets")
@@ -429,28 +591,46 @@ class VistaCrearTicket(discord.ui.View):
             interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
             guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True)
         }
+        
+        rol_atencion = None
         if config_global["rol_atencion_id"]:
-            r = guild.get_role(config_global["rol_atencion_id"])
-            if r: overwrites[r] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+            rol_atencion = guild.get_role(config_global["rol_atencion_id"])
+            if rol_atencion: 
+                overwrites[rol_atencion] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
 
         canal = await guild.create_text_channel(name=f"ticket-{interaction.user.name}", category=cat, overwrites=overwrites)
-        desc = config_global["ticket_bienvenida_desc"].replace("$(user.mention)", interaction.user.mention).replace("$(user.name)", interaction.user.name).replace("$(guild.name)", guild.name)
-        embed = discord.Embed(title=config_global["ticket_bienvenida_titulo"], description=desc, color=config_global["ticket_bienvenida_color"])
-        if config_global["ticket_bienvenida_imagen"]: embed.set_image(url=config_global["ticket_bienvenida_imagen"])
         
-        await canal.send(embed=embed, view=VistaTicketActivo())
-        await interaction.response.send_message(f"✅ ¡Ticket creado en {canal.mention}!", ephemeral=True)
+        # Mensaje de bienvenida personalizado de la opción
+        desc = opcion_data["bienvenida_desc"].replace("$(user.mention)", interaction.user.mention).replace("$(user.name)", interaction.user.name).replace("$(guild.name)", guild.name)
+        embed = discord.Embed(title=opcion_data["bienvenida_titulo"], description=desc, color=opcion_data.get("bienvenida_color", 0x2ECC71))
+        if config_global["ticket_bienvenida_imagen"]: 
+            embed.set_image(url=config_global["ticket_bienvenida_imagen"])
+        
+        mencion_rol = rol_atencion.mention if rol_atencion else ""
+        await canal.send(content=f"{mencion_rol} {interaction.user.mention} abrió un ticket.", embed=embed, view=VistaTicketActivo())
+        await interaction.response.send_message(f"✅ ¡Tu ticket fue creado en {canal.mention}!", ephemeral=True)
 
 
-@client.tree.command(name="ticket", description="Envía el panel de tickets")
+class VistaCrearTicketMenu(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(SelectorOpcionesTicket())
+
+
+@client.tree.command(name="ticket", description="Envía el panel de tickets con el menú desplegable")
 async def ticket(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
-    embed = discord.Embed(title=config_global["ticket_titulo"], description=config_global["ticket_desc"], color=config_global["ticket_color"])
+    
+    embed = discord.Embed(
+        title=config_global["ticket_titulo"],
+        description=config_global["ticket_desc"],
+        color=config_global["ticket_color"]
+    )
     if config_global["ticket_imagen"]: embed.set_image(url=config_global["ticket_imagen"])
     
     destino = interaction.guild.get_channel(config_global["canal_tickets_id"]) if config_global["canal_tickets_id"] else interaction.channel
-    await destino.send(embed=embed, view=VistaCrearTicket())
-    await interaction.response.send_message(f"✅ Panel enviado a {destino.mention}.", ephemeral=True)
+    await destino.send(embed=embed, view=VistaCrearTicketMenu())
+    await interaction.response.send_message(f"✅ Panel de tickets enviado correctamente a {destino.mention}.", ephemeral=True)
 
 
 # ==========================================
@@ -617,7 +797,7 @@ async def lista_eventos(interaction: discord.Interaction):
 
 
 # ==========================================
-# 📋 POSTULACIONES Y MODERACIÓN (CON UNBAN)
+# 🛡️ SANCIONES Y MODERACIÓN (CON UNBAN)
 # ==========================================
 
 @client.tree.command(name="ban", description="Banea a un miembro")
@@ -677,10 +857,14 @@ async def historial(interaction: discord.Interaction, miembro: discord.Member):
     await interaction.response.send_message(embed=discord.Embed(title=f"📜 Sanciones: {miembro.display_name}", description="\n".join([f"• {x}" for x in s]), color=0xE74C3C), ephemeral=True)
 
 
+# ==========================================
+# 🎮 JUEGOS Y AYUDA
+# ==========================================
+
 @client.tree.command(name="help", description="Centro de ayuda")
 async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(title="✨ Centro de Ayuda", description=f"Prefijo: `{config_global['prefijo']}`", color=0x5865F2)
-    embed.add_field(name="⚙ Módulos Completos", value="• `/configuracion` • `/confi-general` • `/variables` • `/antibots`\n• `/organizar-evento` • `/iniciar-evento` • `/lista-eventos`\n• `/ticket` • `/ban` • `/unban` • `/historial` • `/trivia`", inline=False)
+    embed.add_field(name="⚙ Módulos Completos", value="• `/configuracion` • `/confi-general` • `/variables` • `/antibots`\n• `/postulacion` • `/organizar-evento` • `/iniciar-evento` • `/lista-eventos`\n• `/ticket` • `/ban` • `/unban` • `/historial` • `/trivia`", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
