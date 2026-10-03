@@ -11,8 +11,8 @@ config_global = {
     "prefijo": "a¡",
     "rol_comandos_id": None,  
     "rol_atencion_id": None,   
-    "rol_organizar_eventos_id": None, # Nuevo: Rol autorizado para organizar eventos
-    "rol_aprobar_sugerencias_id": None, # Nuevo: Rol autorizado para aprobar/rechazar sugerencias
+    "rol_organizar_eventos_id": None, 
+    "rol_aprobar_sugerencias_id": None, 
     "canal_logs_id": None,     
     "canal_sanciones_id": None, 
     "canal_tickets_id": None,  
@@ -23,11 +23,13 @@ config_global = {
     "antispam_ventana_segundos": 5,
     "antispam_timeout_segundos": 60,
     "antibots_activo": True,
+    # Configuración del panel de tickets principal
     "ticket_titulo": "🎟️ Sistema de Soporte y Tickets",
     "ticket_desc": "Haz clic en el botón inferior para abrir un ticket privado con el staff.",
     "ticket_color": 0x5865F2,
     "ticket_boton_texto": "🎫 Abrir Ticket",
     "ticket_imagen": "", 
+    # Configuración del embed de bienvenida dentro del ticket
     "ticket_bienvenida_titulo": "🎫 Ticket de Soporte Abierto",
     "ticket_bienvenida_desc": "Hola $(user.mention), el staff te atenderá pronto.\nExplica tu duda detalladamente.",
     "ticket_bienvenida_color": 0x2ECC71,
@@ -39,7 +41,7 @@ config_global = {
 
 registro_antispam = defaultdict(list)
 base_datos_sanciones = defaultdict(list)
-eventos_activos = {} # ID del mensaje del evento -> dict con datos y participantes
+eventos_activos = {} 
 
 postulaciones_config = {
     "staff": {
@@ -94,7 +96,6 @@ async def on_ready():
     print(f'¡Bot conectado con éxito como {client.user}!')
 
 
-# --- FUNCIÓN AUXILIAR PARA LOGS DE SANCIONES ---
 async def registrar_log_sancion(guild: discord.Guild, embed: discord.Embed):
     canal_id = config_global["canal_sanciones_id"]
     if canal_id:
@@ -104,7 +105,6 @@ async def registrar_log_sancion(guild: discord.Guild, embed: discord.Embed):
             except: pass
 
 
-# --- SISTEMA ANTI-BOTS AUTOMÁTICO ---
 @client.event
 async def on_member_join(member):
     if member.bot and config_global["antibots_activo"]:
@@ -134,14 +134,14 @@ class VistaSugerenciaStaff(discord.ui.View):
 
     @discord.ui.button(label="✅ Aprobar", style=discord.ButtonStyle.success, custom_id="btn_aprobar_sugerencia")
     async def aprobar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        rol_requerido_id = config_global["rol_aprobar_sugerencias_id"]
+        rol_req_id = config_global["rol_aprobar_sugerencias_id"]
         tiene_permiso = interaction.user.guild_permissions.administrator
-        if not tiene_permiso and rol_requerido_id:
-            rol = interaction.guild.get_role(rol_requerido_id)
+        if not tiene_permiso and rol_req_id:
+            rol = interaction.guild.get_role(rol_req_id)
             if rol and rol in interaction.user.roles: tiene_permiso = True
 
         if not tiene_permiso:
-            return await interaction.response.send_message("❌ No tienes el rol autorizado para aprobar sugerencias.", ephemeral=True)
+            return await interaction.response.send_message("❌ No tienes permisos para aprobar sugerencias.", ephemeral=True)
 
         for child in self.children: child.disabled = True
         embed = interaction.message.embeds[0]
@@ -154,24 +154,24 @@ class VistaSugerenciaStaff(discord.ui.View):
             if usuario:
                 embed_md = discord.Embed(
                     title="💡 Sugerencia Aprobada",
-                    description=f"¡Tu sugerencia en **{interaction.guild.name}** ha sido **APROBADA**!\n\n**Sugerencia original:**\n{embed.description}",
+                    description=f"¡Tu sugerencia en **{interaction.guild.name}** ha sido **APROBADA**!\n\n**Sugerencia:**\n{embed.description}",
                     color=discord.Color.green()
                 )
                 await usuario.send(embed=embed_md)
         except: pass
 
-        await interaction.response.send_message("✅ Sugerencia aprobada correctamente.", ephemeral=True)
+        await interaction.response.send_message("✅ Sugerencia aprobada.", ephemeral=True)
 
     @discord.ui.button(label="❌ Rechazar", style=discord.ButtonStyle.danger, custom_id="btn_rechazar_sugerencia")
     async def rechazar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        rol_requerido_id = config_global["rol_aprobar_sugerencias_id"]
+        rol_req_id = config_global["rol_aprobar_sugerencias_id"]
         tiene_permiso = interaction.user.guild_permissions.administrator
-        if not tiene_permiso and rol_requerido_id:
-            rol = interaction.guild.get_role(rol_requerido_id)
+        if not tiene_permiso and rol_req_id:
+            rol = interaction.guild.get_role(rol_req_id)
             if rol and rol in interaction.user.roles: tiene_permiso = True
 
         if not tiene_permiso:
-            return await interaction.response.send_message("❌ No tienes el rol autorizado para rechazar sugerencias.", ephemeral=True)
+            return await interaction.response.send_message("❌ No tienes permisos para rechazar sugerencias.", ephemeral=True)
 
         for child in self.children: child.disabled = True
         embed = interaction.message.embeds[0]
@@ -184,7 +184,7 @@ class VistaSugerenciaStaff(discord.ui.View):
             if usuario:
                 embed_md = discord.Embed(
                     title="💡 Sugerencia Rechazada",
-                    description=f"Lamentamos informarte que tu sugerencia en **{interaction.guild.name}** ha sido **rechazada**.\n\n**Sugerencia original:**\n{embed.description}",
+                    description=f"Tu sugerencia en **{interaction.guild.name}** ha sido **rechazada**.\n\n**Sugerencia:**\n{embed.description}",
                     color=discord.Color.red()
                 )
                 await usuario.send(embed=embed_md)
@@ -198,23 +198,21 @@ async def on_message(message):
     if message.author.bot or not message.guild:
         return
 
-    # --- SISTEMA DE SUGERENCIAS ---
     canal_sugerencias_id = config_global["canal_sugerencias_id"]
     if canal_sugerencias_id and message.channel.id == canal_sugerencias_id:
         try:
             await message.delete()
             embed = discord.Embed(title="💡 Nueva Sugerencia", description=message.content, color=0x3498DB)
             embed.set_author(name=message.author.display_name, icon_url=message.author.display_avatar.url)
-            embed.set_footer(text=f"ID de usuario: {message.author.id}")
+            embed.set_footer(text=f"ID: {message.author.id}")
 
             nuevo_msg = await message.channel.send(embed=embed, view=VistaSugerenciaStaff(message.author.id))
             await nuevo_msg.add_reaction("👍")
             await nuevo_msg.add_reaction("👎")
         except Exception as e:
-            print(f"Error procesando sugerencia: {e}")
+            print(f"Error en sugerencias: {e}")
         return
 
-    # --- FILTRO ANTI-SPAM CON TIMEOUT ---
     if config_global["antispam_activo"] and not message.author.guild_permissions.administrator:
         ahora = time.time()
         autor_id = message.author.id
@@ -227,265 +225,161 @@ async def on_message(message):
                 await message.delete()
                 duracion_timeout = config_global["antispam_timeout_segundos"]
                 await message.author.timeout(discord.utils.utcnow() + discord.Timedelta(seconds=duracion_timeout), reason="Anti-spam automático")
-                base_datos_sanciones[autor_id].append(f"🔇 **Timeout automático por Spam** ({duracion_timeout}s)")
+                base_datos_sanciones[autor_id].append(f"🔇 **Timeout automático** ({duracion_timeout}s)")
                 
-                embed_log = discord.Embed(title="🔇 Timeout Automático (Anti-Spam)", description=f"**Usuario:** {message.author.mention}\n**Duración:** {duracion_timeout}s", color=discord.Color.orange())
+                embed_log = discord.Embed(title="🔇 Timeout Automático (Anti-Spam)", description=f"**Usuario:** {message.author.mention}", color=discord.Color.orange())
                 await registrar_log_sancion(message.guild, embed_log)
 
-                warning = await message.channel.send(f"⚠️ {message.author.mention} ha recibido un **Timeout de {duracion_timeout} segundos** por spam.")
+                warning = await message.channel.send(f"⚠️ {message.author.mention} Timeout de {duracion_timeout}s por spam.")
                 await asyncio.sleep(5)
                 await warning.delete()
-            except Exception as e:
-                print(f"Error al aplicar timeout: {e}")
+            except: pass
             return
 
 
 # ==========================================
-# ⚙️ CONFIGURACIÓN GENERAL (EMBED CON ROLES Y CANALES)
+# ⚙️ /CONFI-GENERAL EN EMBED INTERACTIVO (SIN FORMULARIOS MOLESTOS)
 # ==========================================
 
-class ModalConfigGeneral(discord.ui.Modal, title="⚙️ Configuración General del Servidor"):
-    input_prefijo = discord.ui.TextInput(label="Prefijo del Bot", default=config_global["prefijo"], required=True, max_length=5)
-    rol_evento_id = discord.ui.TextInput(label="ID Rol Organizar Eventos", default=str(config_global["rol_organizar_eventos_id"] or ""), required=False, max_length=20)
-    rol_sugerencia_id = discord.ui.TextInput(label="ID Rol Aprobar Sugerencias", default=str(config_global["rol_aprobar_sugerencias_id"] or ""), required=False, max_length=20)
-    canal_sancion_id = discord.ui.TextInput(label="ID Canal Logs de Sanciones", default=str(config_global["canal_sanciones_id"] or ""), required=False, max_length=20)
-    canal_sugerencia_id = discord.ui.TextInput(label="ID Canal de Sugerencias", default=str(config_global["canal_sugerencias_id"] or ""), required=False, max_length=20)
+class VistaBotonConfigGeneral(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=120)
 
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            config_global["prefijo"] = self.input_prefijo.value.strip()
-            config_global["rol_organizar_eventos_id"] = int(self.rol_evento_id.value.strip()) if self.rol_evento_id.value.strip() else None
-            config_global["rol_aprobar_sugerencias_id"] = int(self.rol_sugerencia_id.value.strip()) if self.rol_sugerencia_id.value.strip() else None
-            config_global["canal_sanciones_id"] = int(self.canal_sancion_id.value.strip()) if self.canal_sancion_id.value.strip() else None
-            config_global["canal_sugerencias_id"] = int(self.canal_sugerencia_id.value.strip()) if self.canal_sugerencia_id.value.strip() else None
+    @discord.ui.button(label="✏️ Prefijo", style=discord.ButtonStyle.secondary, row=0)
+    async def set_prefijo(self, interaction: discord.Interaction, button: discord.ui.Button):
+        class M(discord.ui.Modal, title="Editar Prefijo"):
+            v = discord.ui.TextInput(label="Nuevo Prefijo", default=config_global["prefijo"], max_length=5)
+            async def on_submit(self, i: discord.Interaction):
+                config_global["prefijo"] = self.v.value.strip()
+                await i.response.send_message(f"✅ Prefijo actualizado a: `{config_global['prefijo']}`", ephemeral=True)
+        await interaction.response.send_modal(M())
 
-            embed_resumen = discord.Embed(
-                title="✅ ¡Configuración General Actualizada!",
-                description="Se han guardado correctamente los roles y canales del sistema:",
-                color=discord.Color.green()
-            )
-            embed_resumen.add_field(name="👑 Rol Organizar Eventos", value=f"<@&{config_global['rol_organizar_eventos_id']}>" if config_global['rol_organizar_eventos_id'] else "No configurado", inline=True)
-            embed_resumen.add_field(name="💡 Rol Aprobar Sugerencias", value=f"<@&{config_global['rol_aprobar_sugerencias_id']}>" if config_global['rol_aprobar_sugerencias_id'] else "No configurado", inline=True)
-            embed_resumen.add_field(name="📢 Canal Sugerencias", value=f"<#{config_global['canal_sugerencias_id']}>" if config_global['canal_sugerencias_id'] else "No configurado", inline=False)
+    @discord.ui.button(label="👑 Rol Eventos", style=discord.ButtonStyle.secondary, row=0)
+    async def set_rolevento(self, interaction: discord.Interaction, button: discord.ui.Button):
+        class M(discord.ui.Modal, title="Configurar Rol Eventos"):
+            v = discord.ui.TextInput(label="ID del Rol", default=str(config_global["rol_organizar_eventos_id"] or ""), max_length=20)
+            async def on_submit(self, i: discord.Interaction):
+                config_global["rol_organizar_eventos_id"] = int(self.v.value.strip()) if self.v.value.strip() else None
+                await i.response.send_message(f"✅ Rol de eventos actualizado.", ephemeral=True)
+        await interaction.response.send_modal(M())
 
-            await interaction.response.send_message(embed=embed_resumen, ephemeral=True)
-        except ValueError:
-            await interaction.response.send_message("❌ Error: Asegúrate de ingresar IDs numéricos válidos en los campos correspondientes.", ephemeral=True)
+    @discord.ui.button(label="💡 Rol Sugerencias", style=discord.ButtonStyle.secondary, row=0)
+    async def set_rolsug(self, interaction: discord.Interaction, button: discord.ui.Button):
+        class M(discord.ui.Modal, title="Configurar Rol Sugerencias"):
+            v = discord.ui.TextInput(label="ID del Rol", default=str(config_global["rol_aprobar_sugerencias_id"] or ""), max_length=20)
+            async def on_submit(self, i: discord.Interaction):
+                config_global["rol_aprobar_sugerencias_id"] = int(self.v.value.strip()) if self.v.value.strip() else None
+                await i.response.send_message(f"✅ Rol de sugerencias actualizado.", ephemeral=True)
+        await interaction.response.send_modal(M())
 
+    @discord.ui.button(label="🛡️ Canal Sanciones", style=discord.ButtonStyle.primary, row=1)
+    async def set_canalsancion(self, interaction: discord.Interaction, button: discord.ui.Button):
+        class M(discord.ui.Modal, title="Configurar Canal Sanciones"):
+            v = discord.ui.TextInput(label="ID del Canal", default=str(config_global["canal_sanciones_id"] or ""), max_length=20)
+            async def on_submit(self, i: discord.Interaction):
+                config_global["canal_sanciones_id"] = int(self.v.value.strip()) if self.v.value.strip() else None
+                await i.response.send_message(f"✅ Canal de sanciones actualizado.", ephemeral=True)
+        await interaction.response.send_modal(M())
 
-class ModalEditarPanelTicket(discord.ui.Modal, title="Editar Panel Principal de Tickets"):
-    titulo = discord.ui.TextInput(label="Título del Embed", default=config_global["ticket_titulo"], required=True, max_length=100)
-    color = discord.ui.TextInput(label="Color Hex (ej: #5865F2)", default=f"#{config_global['ticket_color']:06x}", required=True, max_length=7)
-    boton = discord.ui.TextInput(label="Texto del Botón", default=config_global["ticket_boton_texto"], required=True, max_length=80)
-    imagen = discord.ui.TextInput(label="URL de la Imagen / Banner (Opcional)", default=config_global["ticket_imagen"], required=False, max_length=500)
-    descripcion = discord.ui.TextInput(label="Descripción del Embed", style=discord.TextStyle.paragraph, default=config_global["ticket_desc"], required=True, max_length=1000)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        try: nuevo_color = int(self.color.value.strip().replace("#", ""), 16)
-        except: return await interaction.response.send_message("❌ Color Hex inválido.", ephemeral=True)
-
-        config_global["ticket_titulo"] = self.titulo.value.strip()
-        config_global["ticket_color"] = nuevo_color
-        config_global["ticket_boton_texto"] = self.boton.value.strip()
-        config_global["ticket_imagen"] = self.imagen.value.strip()
-        config_global["ticket_desc"] = self.descripcion.value.strip()
-
-        await interaction.response.send_message("✅ ¡Panel de tickets actualizado con éxito!", ephemeral=True)
-
-
-@client.tree.command(name="configuracion", description="Panel visual interactivo para tickets")
-async def configuracion(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
-    await interaction.response.send_modal(ModalEditarPanelTicket())
+    @discord.ui.button(label="📢 Canal Sugerencias", style=discord.ButtonStyle.primary, row=1)
+    async def set_canalsug(self, interaction: discord.Interaction, button: discord.ui.Button):
+        class M(discord.ui.Modal, title="Configurar Canal Sugerencias"):
+            v = discord.ui.TextInput(label="ID del Canal", default=str(config_global["canal_sugerencias_id"] or ""), max_length=20)
+            async def on_submit(self, i: discord.Interaction):
+                config_global["canal_sugerencias_id"] = int(self.v.value.strip()) if self.v.value.strip() else None
+                await i.response.send_message(f"✅ Canal de sugerencias actualizado.", ephemeral=True)
+        await interaction.response.send_modal(M())
 
 
-@client.tree.command(name="confi-general", description="Abre el panel de configuración de roles y canales generales")
+@client.tree.command(name="confi-general", description="Panel visual en Embed para configurar roles y canales")
 async def confi_general(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
-        return await interaction.response.send_message("❌ Solo los administradores pueden usar este comando.", ephemeral=True)
-    
-    await interaction.response.send_modal(ModalConfigGeneral())
+        return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
 
+    embed = discord.Embed(
+        title="⚙️ Panel de Configuración General",
+        description="Haz clic en los botones inferiores para editar cada parámetro individualmente de forma visual:",
+        color=0x3498DB
+    )
+    embed.add_field(name="📌 Prefijo actual", value=f"`{config_global['prefijo']}`", inline=True)
+    embed.add_field(name="👑 Rol Organizar Eventos", value=f"<@&{config_global['rol_organizar_eventos_id']}>" if config_global['rol_organizar_eventos_id'] else "No configurado", inline=True)
+    embed.add_field(name="💡 Rol Aprobar Sugerencias", value=f"<@&{config_global['rol_aprobar_sugerencias_id']}>" if config_global['rol_aprobar_sugerencias_id'] else "No configurado", inline=True)
+    embed.add_field(name="🛡️ Canal Sanciones", value=f"<#{config_global['canal_sanciones_id']}>" if config_global['canal_sanciones_id'] else "No configurado", inline=True)
+    embed.add_field(name="📢 Canal Sugerencias", value=f"<#{config_global['canal_sugerencias_id']}>" if config_global['canal_sugerencias_id'] else "No configurado", inline=True)
 
-@client.tree.command(name="variables", description="Muestra la lista de variables disponibles")
-async def variables(interaction: discord.Interaction):
-    embed = discord.Embed(title="📚 Variables Disponibles", description="• `$(user.mention)`\n• `$(user.name)`\n• `$(guild.name)`", color=0xF1C40F)
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-
-@client.tree.command(name="antibots", description="Activa o desactiva Anti-Bots")
-@app_commands.choices(estado=[app_commands.Choice(name="Activado", value="on"), app_commands.Choice(name="Desactivado", value="off")])
-async def antibots(interaction: discord.Interaction, estado: str):
-    if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
-    config_global["antibots_activo"] = (estado == "on")
-    await interaction.response.send_message(f"🛡️ Anti-Bots **{'activado' if config_global['antibots_activo'] else 'desactivado'}**.", ephemeral=True)
+    await interaction.response.send_message(embed=embed, view=VistaBotonConfigGeneral(), ephemeral=True)
 
 
 # ==========================================
-# 📅 SISTEMA DE EVENTOS Y /INICIAR-EVENTO
+# 🎫 /CONFIGURACION (EMBED PRINCIPAL DE TICKETS EDITABLE EN TIEMPO REAL)
 # ==========================================
 
-class VistaEventoParticipar(discord.ui.View):
+class VistaEditorEmbedTicket(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None)
+        super().__init__(timeout=120)
 
-    @discord.ui.button(label="🎉 Participar", style=discord.ButtonStyle.success, custom_id="btn_participar_evento_rt")
-    async def participar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        msg_id = interaction.message.id
-        if msg_id not in eventos_activos:
-            return await interaction.response.send_message("❌ Este evento ya no está activo.", ephemeral=True)
+    @discord.ui.button(label="✏️️ Título", style=discord.ButtonStyle.secondary, row=0)
+    async def ed_titulo(self, interaction: discord.Interaction, button: discord.ui.Button):
+        class M(discord.ui.Modal, title="Editar Título del Ticket"):
+            v = discord.ui.TextInput(label="Título", default=config_global["ticket_titulo"], max_length=100)
+            async def on_submit(self, i: discord.Interaction):
+                config_global["ticket_titulo"] = self.v.value.strip()
+                await i.response.send_message("✅ Título actualizado.", ephemeral=True)
+        await interaction.response.send_modal(M())
 
-        datos = eventos_activos[msg_id]
-        participantes = datos["participantes"]
+    @discord.ui.button(label="📄 Descripción", style=discord.ButtonStyle.secondary, row=0)
+    async def ed_desc(self, interaction: discord.Interaction, button: discord.ui.Button):
+        class M(discord.ui.Modal, title="Editar Descripción"):
+            v = discord.ui.TextInput(label="Descripción", style=discord.TextStyle.paragraph, default=config_global["ticket_desc"], max_length=1000)
+            async def on_submit(self, i: discord.Interaction):
+                config_global["ticket_desc"] = self.v.value.strip()
+                await i.response.send_message("✅ Descripción actualizada.", ephemeral=True)
+        await interaction.response.send_modal(M())
 
-        if interaction.user.id in participantes:
-            participantes.remove(interaction.user.id)
-            estado_msj = "❌ Te has **retirado** del evento."
-        else:
-            participantes.add(interaction.user.id)
-            estado_msj = "✅ ¡Te has **unido** exitosamente al evento!"
+    @discord.ui.button(label="🎨 Color Hex", style=discord.ButtonStyle.secondary, row=0)
+    async def ed_color(self, interaction: discord.Interaction, button: discord.ui.Button):
+        class M(discord.ui.Modal, title="Editar Color Hex"):
+            v = discord.ui.TextInput(label="Color (ej: #5865F2)", default=f"#{config_global['ticket_color']:06x}", max_length=7)
+            async def on_submit(self, i: discord.Interaction):
+                try: config_global["ticket_color"] = int(self.v.value.strip().replace("#", ""), 16)
+                except: return await i.response.send_message("❌ Color inválido.", ephemeral=True)
+                await i.response.send_message("✅ Color actualizado.", ephemeral=True)
+        await interaction.response.send_modal(M())
 
-        guild = interaction.guild
-        nombres = [guild.get_member(uid).display_name for uid in participantes if guild.get_member(uid)]
-        lista_nombres_str = ", ".join(nombres) if nombres else "Nadie apuntado aún"
+    @discord.ui.button(label="🖼️ Imagen / Banner", style=discord.ButtonStyle.primary, row=1)
+    async def ed_img(self, interaction: discord.Interaction, button: discord.ui.Button):
+        class M(discord.ui.Modal, title="Editar URL de Imagen"):
+            v = discord.ui.TextInput(label="URL de la imagen", default=config_global["ticket_imagen"], required=False, max_length=500)
+            async def on_submit(self, i: discord.Interaction):
+                config_global["ticket_imagen"] = self.v.value.strip()
+                await i.response.send_message("✅ Imagen actualizada.", ephemeral=True)
+        await interaction.response.send_modal(M())
 
-        embed_viejo = interaction.message.embeds[0]
-        embed_nuevo = discord.Embed(
-            title=embed_viejo.title,
-            description=embed_viejo.description.split("\n\n👑")[0],
-            color=embed_viejo.color
-        )
-        embed_nuevo.add_field(name="👑 Organizadores", value=datos["organizadores"], inline=False)
-        embed_nuevo.add_field(name="⏰ Inicio", value=datos["tiempo"], inline=True)
-        embed_nuevo.add_field(name="🏆 Ganadores", value=datos["ganadores"], inline=True)
-        embed_nuevo.add_field(name=f"👥 Participantes ({len(participantes)})", value=lista_nombres_str, inline=False)
-        
-        if embed_viejo.image.url:
-            embed_nuevo.set_image(url=embed_viejo.image.url)
-
-        await interaction.message.edit(embed=embed_nuevo)
-        await interaction.response.send_message(estado_msj, ephemeral=True)
-
-
-@client.tree.command(name="organizar-evento", description="Organiza un evento con múltiples organizadores y tiempo real")
-@app_commands.describe(
-    nombre="Nombre del evento", 
-    canal="Canal donde se publicará", 
-    texto="Descripción del evento", 
-    organizadores="Nombres de los organizadores (ej: @Mod1, @Mod2)",
-    tiempo="¿Cuándo empieza? (ej: Mañana a las 5 PM)",
-    ganadores="Número de ganadores (ej: 3 ganadores)",
-    mencion="Rol a pingo avisar (ej: @everyone)"
-)
-async def organizar_evento(interaction: discord.Interaction, nombre: str, canal: discord.TextChannel, texto: str, organizadores: str, tiempo: str, ganadores: str, mencion: str = ""):
-    rol_req_id = config_global["rol_organizar_eventos_id"]
-    tiene_permiso = interaction.user.guild_permissions.manage_events or interaction.user.guild_permissions.administrator
-    if not tiene_permiso and rol_req_id:
-        rol = interaction.guild.get_role(rol_req_id)
-        if rol and rol in interaction.user.roles: tiene_permiso = True
-
-    if not tiene_permiso:
-        return await interaction.response.send_message("❌ No tienes el rol autorizado para organizar eventos.", ephemeral=True)
-
-    embed = discord.Embed(title=f"📅 ¡Evento: {nombre}!", description=texto, color=0xE91E63)
-    embed.add_field(name="👑 Organizadores", value=organizadores, inline=False)
-    embed.add_field(name="⏰ Inicio", value=tiempo, inline=True)
-    embed.add_field(name="🏆 Ganadores", value=ganadores, inline=True)
-    embed.add_field(name="👥 Participantes (0)", value="Nadie apuntado aún", inline=False)
-    embed.set_footer(text="Haz clic en el botón inferior para unirte en tiempo real.")
-
-    mensaje = await canal.send(content=mencion if mencion else "", embed=embed, view=VistaEventoParticipar())
-
-    eventos_activos[mensaje.id] = {
-        "nombre": nombre,
-        "organizadores": organizadores,
-        "tiempo": tiempo,
-        "ganadores": ganadores,
-        "participantes": set(),
-        "canal_id": canal.id
-    }
-
-    await interaction.response.send_message(f"✅ ¡Evento **{nombre}** creado y publicado correctamente en {canal.mention}!", ephemeral=True)
+    @discord.ui.button(label="🔘 Texto Botón", style=discord.ButtonStyle.secondary, row=1)
+    async def ed_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        class M(discord.ui.Modal, title="Editar Botón"):
+            v = discord.ui.TextInput(label="Texto del botón", default=config_global["ticket_boton_texto"], max_length=80)
+            async def on_submit(self, i: discord.Interaction):
+                config_global["ticket_boton_texto"] = self.v.value.strip()
+                await i.response.send_message("✅ Botón actualizado.", ephemeral=True)
+        await interaction.response.send_modal(M())
 
 
-class SelectorIniciarEvento(discord.ui.Select):
-    def __init__(self, eventos: dict):
-        options = []
-        for msg_id, datos in eventos.items():
-            options.append(discord.SelectOption(label=datos["nombre"][:100], description=f"Organizadores: {datos['organizadores'][:50]}", value=str(msg_id)))
-        super().__init__(placeholder="Selecciona el evento que deseas iniciar...", options=options)
+@client.tree.command(name="configuracion", description="Visualiza y edita en vivo el Embed principal de Tickets")
+async def configuracion(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
 
-    async def callback(self, interaction: discord.Interaction):
-        msg_id = int(self.values[0])
-        if msg_id not in eventos_activos:
-            return await interaction.response.send_message("❌ Este evento ya no está disponible.", ephemeral=True)
-        
-        datos = eventos_activos[msg_id]
-        guild = interaction.guild
-        canal = guild.get_channel(datos["canal_id"])
+    embed_preview = discord.Embed(
+        title=config_global["ticket_titulo"],
+        description=config_global["ticket_desc"],
+        color=config_global["ticket_color"]
+    )
+    if config_global["ticket_imagen"]:
+        embed_preview.set_image(url=config_global["ticket_imagen"])
+    embed_preview.set_footer(text="Vista previa en tiempo real del Panel de Tickets")
 
-        class ModalInicioPing(discord.ui.Modal, title="Iniciar Evento - Mención"):
-            mencion_input = discord.ui.TextInput(label="Rol o Mención para el inicio (ej: @everyone)", default="@everyone", required=True, max_length=50)
-
-            async def on_submit(self, i2: discord.Interaction):
-                ping = self.mencion_input.value
-                if canal:
-                    embed_inicio = discord.Embed(
-                        title=f"🚨 ¡EL EVENTO '{datos['nombre']}' VA A DAR INICIO!",
-                        description=f"¡Atención a todos! El evento organizado por **{datos['organizadores']}** está comenzando ahora mismo.\n\n¡Prepárense todos los participantes!",
-                        color=discord.Color.gold()
-                    )
-                    await canal.send(content=ping, embed=embed_inicio)
-                    await i2.response.send_message(f"✅ ¡Anuncio de inicio enviado con éxito a {canal.mention}!", ephemeral=True)
-                else:
-                    await i2.response.send_message("❌ No se encontró el canal del evento.", ephemeral=True)
-
-        await interaction.response.send_modal(ModalInicioPing())
-
-
-class VistaSelectorEventos(discord.ui.View):
-    def __init__(self, eventos: dict):
-        super().__init__(timeout=30)
-        self.add_item(SelectorIniciarEvento(eventos))
-
-
-@client.tree.command(name="iniciar-evento", description="Selecciona un evento activo y envía el aviso de inicio con ping")
-async def iniciar_evento(interaction: discord.Interaction):
-    rol_req_id = config_global["rol_organizar_eventos_id"]
-    tiene_permiso = interaction.user.guild_permissions.manage_events or interaction.user.guild_permissions.administrator
-    if not tiene_permiso and rol_req_id:
-        rol = interaction.guild.get_role(rol_req_id)
-        if rol and rol in interaction.user.roles: tiene_permiso = True
-
-    if not tiene_permiso:
-        return await interaction.response.send_message("❌ No tienes permisos para iniciar eventos.", ephemeral=True)
-    if not eventos_activos:
-        return await interaction.response.send_message("🛡️ No hay ningún evento activo para iniciar.", ephemeral=True)
-
-    embed = discord.Embed(title="🚀 Iniciar Evento", description="Selecciona en el menú desplegable el evento que deseas anunciar:", color=0x3498DB)
-    await interaction.response.send_message(embed=embed, view=VistaSelectorEventos(eventos_activos), ephemeral=True)
-
-
-@client.tree.command(name="lista-eventos", description="Muestra todos los eventos activos y sus participantes")
-async def lista_eventos(interaction: discord.Interaction):
-    if not eventos_activos:
-        return await interaction.response.send_message("🛡️ No hay eventos activos en este momento.", ephemeral=True)
-
-    embed = discord.Embed(title="📊 Lista General de Eventos Activos", color=0x9B59B6)
-    guild = interaction.guild
-
-    for msg_id, datos in eventos_activos.items():
-        canal = guild.get_channel(datos["canal_id"])
-        nombres = [guild.get_member(uid).display_name for uid in datos["participantes"] if guild.get_member(uid)]
-        lista_str = ", ".join(nombres) if nombres else "Nadie apuntado"
-        
-        embed.add_field(
-            name=f"📌 {datos['nombre']} ({canal.mention if canal else 'Canal'})",
-            value=f"**Organizadores:** {datos['organizadores']}\n**Inicio:** {datos['tiempo']} | **Ganadores:** {datos['ganadores']}\n**Participantes ({len(datos['participantes'])}):** {lista_str}",
-            inline=False
-        )
-
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.response.send_message(embed=embed_preview, view=VistaEditorEmbedTicket(), ephemeral=True)
 
 
 # ==========================================
@@ -560,50 +454,170 @@ async def ticket(interaction: discord.Interaction):
 
 
 # ==========================================
-# 📋 POSTULACIONES PÚBLICAS
+# 📅 SISTEMA DE EVENTOS Y /INICIAR-EVENTO
 # ==========================================
 
-class VistaComenzarPostulacion(discord.ui.View):
-    def __init__(self, tipo, num_id, preguntas, miembro_postulado, config_form):
+class VistaEventoParticipar(discord.ui.View):
+    def __init__(self):
         super().__init__(timeout=None)
-        self.tipo, self.num_id, self.preguntas, self.miembro_postulado, self.config_form = tipo, num_id, preguntas, miembro_postulado, config_form
 
-    @discord.ui.button(label="🚀 Comenzar Postulación", style=discord.ButtonStyle.success)
-    async def comenzar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.miembro_postulado.id: return await interaction.response.send_message("❌ No es tu formulario.", ephemeral=True)
-        await interaction.response.send_message("📬 ¡Cuestionario abierto en tus **Mensajes Privados (MD)**!", ephemeral=True)
-        try:
-            respuestas = []
-            for i, preg in enumerate(self.preguntas):
-                await self.miembro_postulado.send(embed=discord.Embed(title=f"Pregunta {i+1}", description=preg, color=self.config_form['color']))
-                msg = await client.wait_for('message', timeout=90.0, check=lambda m: m.author.id == self.miembro_postulado.id and isinstance(m.channel, discord.DMChannel))
-                respuestas.append((preg, msg.content))
-            
-            txt = "".join([f"**{p}**\n↳ {r}\n\n" for p, r in respuestas])
-            embed_final = discord.Embed(title=f"{self.config_form['titulo']} (#{self.num_id})", description=f"👤 **Candidato:** {self.miembro_postulado.mention}\n\n{txt}", color=self.config_form['color'])
-            
-            destino = interaction.guild.get_channel(config_global["canal_logs_id"]) if config_global["canal_logs_id"] else interaction.channel
-            if destino: await destino.send(embed=embed_final)
-            await self.miembro_postulado.send("🎉 ¡Postulación completada!")
-        except: pass
+    @discord.ui.button(label="🎉 Participar", style=discord.ButtonStyle.success, custom_id="btn_participar_evento_rt")
+    async def participar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        msg_id = interaction.message.id
+        if msg_id not in eventos_activos:
+            return await interaction.response.send_message("❌ Este evento ya no está activo.", ephemeral=True)
+
+        datos = eventos_activos[msg_id]
+        participantes = datos["participantes"]
+
+        if interaction.user.id in participantes:
+            participantes.remove(interaction.user.id)
+            estado_msj = "❌ Te has **retirado** del evento."
+        else:
+            participantes.add(interaction.user.id)
+            estado_msj = "✅ ¡Te has **unido** exitosamente al evento!"
+
+        guild = interaction.guild
+        nombres = [guild.get_member(uid).display_name for uid in participantes if guild.get_member(uid)]
+        lista_nombres_str = ", ".join(nombres) if nombres else "Nadie apuntado aún"
+
+        embed_viejo = interaction.message.embeds[0]
+        embed_nuevo = discord.Embed(
+            title=embed_viejo.title,
+            description=embed_viejo.description.split("\n\n👑")[0],
+            color=embed_viejo.color
+        )
+        embed_nuevo.add_field(name="👑 Organizadores", value=datos["organizadores"], inline=False)
+        embed_nuevo.add_field(name="⏰ Inicio", value=datos["tiempo"], inline=True)
+        embed_nuevo.add_field(name="🏆 Ganadores", value=datos["ganadores"], inline=True)
+        embed_nuevo.add_field(name=f"👥 Participantes ({len(participantes)})", value=lista_nombres_str, inline=False)
+        
+        if embed_viejo.image.url:
+            embed_nuevo.set_image(url=embed_viejo.image.url)
+
+        await interaction.message.edit(embed=embed_nuevo)
+        await interaction.response.send_message(estado_msj, ephemeral=True)
 
 
-@client.tree.command(name="postulacion", description="Inicia un panel de postulación")
-async def postulacion(interaction: discord.Interaction, miembro: discord.Member):
-    v = discord.ui.View(timeout=30)
-    s = discord.ui.Select(placeholder="Elige postulación...", options=[discord.SelectOption(label="Staff", value="staff"), discord.SelectOption(label="Casa Alianza", value="ally"), discord.SelectOption(label="Redes", value="redes"), discord.SelectOption(label="Nexus", value="nexus")])
-    async def cb(i):
-        cfg = postulaciones_config.get(s.values[0], {})
-        config_global["contador_postulaciones"] += 1
-        await i.channel.send(embed=discord.Embed(title=cfg['titulo'], description=f"Candidato: {miembro.mention}", color=cfg['color']), view=VistaComenzarPostulacion(s.values[0], config_global["contador_postulaciones"], cfg["preguntas"], miembro, cfg))
-        await i.response.edit_message(content="✅ Creado.", embed=None, view=None)
-    s.callback = cb
-    v.add_item(s)
-    await interaction.response.send_message(embed=discord.Embed(title="📋 Postulaciones", description=f"Para {miembro.display_name}:"), view=v, ephemeral=True)
+@client.tree.command(name="organizar-evento", description="Organiza un evento con múltiples organizadores y tiempo real")
+@app_commands.describe(
+    nombre="Nombre del evento", 
+    canal="Canal donde se publicará", 
+    texto="Descripción del evento", 
+    organizadores="Nombres de los organizadores (ej: @Mod1, @Mod2)",
+    tiempo="¿Cuándo empieza? (ej: Mañana a las 5 PM)",
+    ganadores="Número de ganadores (ej: 3 ganadores)",
+    mencion="Rol a pingo avisar (ej: @everyone)"
+)
+async def organizar_evento(interaction: discord.Interaction, nombre: str, canal: discord.TextChannel, texto: str, organizadores: str, tiempo: str, ganadores: str, mencion: str = ""):
+    rol_req_id = config_global["rol_organizar_eventos_id"]
+    tiene_permiso = interaction.user.guild_permissions.manage_events or interaction.user.guild_permissions.administrator
+    if not tiene_permiso and rol_req_id:
+        rol = interaction.guild.get_role(rol_req_id)
+        if rol and rol in interaction.user.roles: tiene_permiso = True
+
+    if not tiene_permiso:
+        return await interaction.response.send_message("❌ No tienes permisos para organizar eventos.", ephemeral=True)
+
+    embed = discord.Embed(title=f"📅 ¡Evento: {nombre}!", description=texto, color=0xE91E63)
+    embed.add_field(name="👑 Organizadores", value=organizadores, inline=False)
+    embed.add_field(name="⏰ Inicio", value=tiempo, inline=True)
+    embed.add_field(name="🏆 Ganadores", value=ganadores, inline=True)
+    embed.add_field(name="👥 Participantes (0)", value="Nadie apuntado aún", inline=False)
+    embed.set_footer(text="Haz clic en el botón inferior para unirte en tiempo real.")
+
+    mensaje = await canal.send(content=mencion if mencion else "", embed=embed, view=VistaEventoParticipar())
+
+    eventos_activos[mensaje.id] = {
+        "nombre": nombre,
+        "organizadores": organizadores,
+        "tiempo": tiempo,
+        "ganadores": ganadores,
+        "participantes": set(),
+        "canal_id": canal.id
+    }
+
+    await interaction.response.send_message(f"✅ ¡Evento **{nombre}** publicado en {canal.mention}!", ephemeral=True)
+
+
+class SelectorIniciarEvento(discord.ui.Select):
+    def __init__(self, eventos: dict):
+        options = []
+        for msg_id, datos in eventos.items():
+            options.append(discord.SelectOption(label=datos["nombre"][:100], description=f"Organizadores: {datos['organizadores'][:50]}", value=str(msg_id)))
+        super().__init__(placeholder="Selecciona el evento que deseas iniciar...", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        msg_id = int(self.values[0])
+        if msg_id not in eventos_activos:
+            return await interaction.response.send_message("❌ Este evento ya no está disponible.", ephemeral=True)
+        
+        datos = eventos_activos[msg_id]
+        guild = interaction.guild
+        canal = guild.get_channel(datos["canal_id"])
+
+        class ModalInicioPing(discord.ui.Modal, title="Iniciar Evento - Mención"):
+            mencion_input = discord.ui.TextInput(label="Rol o Mención (ej: @everyone)", default="@everyone", required=True, max_length=50)
+
+            async def on_submit(self, i2: discord.Interaction):
+                ping = self.mencion_input.value
+                if canal:
+                    embed_inicio = discord.Embed(
+                        title=f"🚨 ¡EL EVENTO '{datos['nombre']}' VA A DAR INICIO!",
+                        description=f"¡El evento organizado por **{datos['organizadores']}** comienza ahora mismo!",
+                        color=discord.Color.gold()
+                    )
+                    await canal.send(content=ping, embed=embed_inicio)
+                    await i2.response.send_message(f"✅ ¡Anuncio enviado a {canal.mention}!", ephemeral=True)
+
+        await interaction.response.send_modal(ModalInicioPing())
+
+
+class VistaSelectorEventos(discord.ui.View):
+    def __init__(self, eventos: dict):
+        super().__init__(timeout=30)
+        self.add_item(SelectorIniciarEvento(eventos))
+
+
+@client.tree.command(name="iniciar-evento", description="Selecciona un evento activo y envía el aviso de inicio")
+async def iniciar_evento(interaction: discord.Interaction):
+    rol_req_id = config_global["rol_organizar_eventos_id"]
+    tiene_permiso = interaction.user.guild_permissions.manage_events or interaction.user.guild_permissions.administrator
+    if not tiene_permiso and rol_req_id:
+        rol = interaction.guild.get_role(rol_req_id)
+        if rol and rol in interaction.user.roles: tiene_permiso = True
+
+    if not tiene_permiso:
+        return await interaction.response.send_message("❌ No tienes permisos.", ephemeral=True)
+    if not eventos_activos:
+        return await interaction.response.send_message("🛡️ No hay eventos activos.", ephemeral=True)
+
+    await interaction.response.send_message(embed=discord.Embed(title="🚀 Iniciar Evento", description="Selecciona en el menú desplegable:", color=0x3498DB), view=VistaSelectorEventos(eventos_activos), ephemeral=True)
+
+
+@client.tree.command(name="lista-eventos", description="Muestra todos los eventos activos")
+async def lista_eventos(interaction: discord.Interaction):
+    if not eventos_activos:
+        return await interaction.response.send_message("🛡️ No hay eventos activos.", ephemeral=True)
+
+    embed = discord.Embed(title="📊 Lista de Eventos Activos", color=0x9B59B6)
+    guild = interaction.guild
+
+    for msg_id, datos in eventos_activos.items():
+        canal = guild.get_channel(datos["canal_id"])
+        nombres = [guild.get_member(uid).display_name for uid in datos["participantes"] if guild.get_member(uid)]
+        lista_str = ", ".join(nombres) if nombres else "Nadie apuntado"
+        
+        embed.add_field(
+            name=f"📌 {datos['nombre']} ({canal.mention if canal else 'Canal'})",
+            value=f"**Organizadores:** {datos['organizadores']}\n**Participantes ({len(datos['participantes'])}):** {lista_str}",
+            inline=False
+        )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 # ==========================================
-# 🛡️ SANCIONES Y MODERACIÓN (CON UNBAN)
+# 📋 POSTULACIONES Y MODERACIÓN (CON UNBAN)
 # ==========================================
 
 @client.tree.command(name="ban", description="Banea a un miembro")
@@ -614,7 +628,7 @@ async def ban(interaction: discord.Interaction, miembro: discord.Member, razon: 
     await interaction.response.send_message(f"🔨 {miembro.mention} baneado.")
 
 
-@client.tree.command(name="unban", description="Desbanea a un usuario por ID o Nombre")
+@client.tree.command(name="unban", description="Desbanea a un usuario")
 async def unban(interaction: discord.Interaction, usuario_id: str, razon: str = "Sin motivo"):
     if not interaction.user.guild_permissions.ban_members: return await interaction.response.send_message("❌ Sin permisos.", ephemeral=True)
     async for entry in interaction.guild.bans():
@@ -656,21 +670,17 @@ async def warn(interaction: discord.Interaction, miembro: discord.Member, razon:
     await interaction.response.send_message(f"⚠️ {miembro.mention} advertido.")
 
 
-@client.tree.command(name="historial", description="Muestra sanciones de un usuario")
+@client.tree.command(name="historial", description="Muestra sanciones")
 async def historial(interaction: discord.Interaction, miembro: discord.Member):
     s = base_datos_sanciones.get(miembro.id, [])
     if not s: return await interaction.response.send_message(f"🛡 {miembro.mention} limpio.", ephemeral=True)
     await interaction.response.send_message(embed=discord.Embed(title=f"📜 Sanciones: {miembro.display_name}", description="\n".join([f"• {x}" for x in s]), color=0xE74C3C), ephemeral=True)
 
 
-# ==========================================
-# 🎮 JUEGOS Y AYUDA
-# ==========================================
-
 @client.tree.command(name="help", description="Centro de ayuda")
 async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(title="✨ Centro de Ayuda", description=f"Prefijo: `{config_global['prefijo']}`", color=0x5865F2)
-    embed.add_field(name="⚙ Módulos Completos", value="• `/configuracion` • `/confi-general` • `/variables` • `/antibots`\n• `/organizar-evento` • `/iniciar-evento` • `/lista-eventos`\n• `/ticket` • `/postulacion` • `/ban` • `/unban` • `/historial` • `/trivia`", inline=False)
+    embed.add_field(name="⚙ Módulos Completos", value="• `/configuracion` • `/confi-general` • `/variables` • `/antibots`\n• `/organizar-evento` • `/iniciar-evento` • `/lista-eventos`\n• `/ticket` • `/ban` • `/unban` • `/historial` • `/trivia`", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
