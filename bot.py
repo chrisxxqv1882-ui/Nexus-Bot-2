@@ -716,7 +716,37 @@ class VistaEleccionPPT(discord.ui.View):
     async def papel(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.procesar_jugada(interaction, "papel")
 
-    discord.SelectOption(label="Tijera", emoji="✂️", value="tijera")
+    @discord.ui.button(label="✂️ Tijera", style=discord.ButtonStyle.secondary)
+    async def tijera(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.procesar_jugada(interaction, "tijera")
+
+    async def procesar_jugada(self, interaction: discord.Interaction, jugada: str):
+        if interaction.user.id != self.retado.id:
+            return await interaction.response.send_message("❌ Este duelo no es para ti.", ephemeral=True)
+
+        self.jugada_retado = jugada
+        r1, r2 = self.jugada_retador, self.jugada_retado
+
+        if r1 == r2:
+            res = "¡Empate técnico! 🤝"
+        elif (r1 == "piedra" and r2 == "tijera") or (r1 == "papel" and r2 == "piedra") or (r1 == "tijera" and r2 == "papel"):
+            res = f"🎉 ¡{self.retador.mention} gana el duelo con **{r1}** frente a **{r2}**!"
+        else:
+            res = f"🎉 ¡{self.retado.mention} gana el duelo con **{r2}** frente a **{r1}**!"
+
+        for child in self.children: child.disabled = True
+        await interaction.message.edit(view=self)
+        await interaction.response.send_message(f"⚔️️ **Resultado Duelo PPT**:\n{self.retador.mention} (`{r1}`) vs {self.retado.mention} (`{r2}`)\n\n{res}")
+
+
+class SelectorPPTInicial(discord.ui.Select):
+    def __init__(self, retador: discord.Member, retado: discord.Member):
+        self.retador = retador
+        self.retado = retado
+        options = [
+            discord.SelectOption(label="Piedra", emoji="🪨", value="piedra"),
+            discord.SelectOption(label="Papel", emoji="📄", value="papel"),
+            discord.SelectOption(label="Tijera", emoji="✂️", value="tijera")
         ]
         super().__init__(placeholder="Elige tu jugada secreta...", options=options)
 
