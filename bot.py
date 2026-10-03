@@ -6,26 +6,24 @@ from collections import defaultdict
 import discord
 from discord import app_commands
 
-# Configuración global del bot, roles, canales, prefijo y anti-spam
+# Configuración global del bot, roles, canales, prefijo y anti-spam (con duración de timeout configurable)
 config_global = {
     "prefijo": "a¡",
     "rol_comandos_id": None,  
     "rol_atencion_id": None,   
     "canal_logs_id": None,     
     "contador_postulaciones": 0, 
-    # Configuración del Anti-Spam
     "antispam_activo": True,
-    "antispam_limite_mensajes": 5, # Máximo de mensajes permitidos
-    "antispam_ventana_segundos": 5, # En X segundos
+    "antispam_limite_mensajes": 5,
+    "antispam_ventana_segundos": 5,
+    "antispam_timeout_segundos": 60, # Tiempo de castigo predeterminado en segundos
     "embed_juegos_titulo": "🎮 Zona de Juegos e Interacción",
     "embed_juegos_desc": "¡Diviértete con los minijuegos multijugador y nuestra trivia masiva estilo Nekotrivia!",
     "embed_juegos_color": 0xF1C40F
 }
 
-# Control en memoria para el Anti-Spam (usuario_id -> lista de timestamps)
 registro_antispam = defaultdict(list)
 
-# Base de datos en memoria para formularios
 postulaciones_config = {
     "staff": {
         "titulo": "📝 Postulación: Cuerpo de Moderación",
@@ -49,7 +47,6 @@ postulaciones_config = {
     }
 }
 
-# 🧠 BANCO DE TRIVIA CON GIFS FUNCIONALES Y ESTABLES
 BANCO_TRIVIA = [
     {
         "p": "¿Cómo se llama el protagonista de Dragon Ball que come sin parar?",
@@ -157,12 +154,10 @@ async def on_message(message):
     if message.author.bot or not message.guild:
         return
 
-    # --- FILTRO ANTI-SPAM ---
+    # --- FILTRO ANTI-SPAM CON TIMEOUT AUTOMÁTICO ---
     if config_global["antispam_activo"] and not message.author.guild_permissions.administrator:
         ahora = time.time()
         autor_id = message.author.id
-        
-        # Limpiar registros antiguos fuera de la ventana de tiempo
         ventana = config_global["antispam_ventana_segundos"]
         registro_antispam[autor_id] = [t for t in registro_antispam[autor_id] if ahora - t < ventana]
         registro_antispam[autor_id].append(ahora)
@@ -170,21 +165,23 @@ async def on_message(message):
         if len(registro_antispam[autor_id]) > config_global["antispam_limite_mensajes"]:
             try:
                 await message.delete()
-                warning = await message.channel.send(f"⚠️ {message.author.mention}, estás enviando mensajes demasiado rápido (Anti-spam activo).")
-                await asyncio.sleep(4)
+                # Aplicar Timeout (Silenciamiento) al usuario
+                duracion_timeout = config_global["antispam_timeout_segundos"]
+                await message.author.timeout(discord.utils.utcnow() + discord.Timedelta(seconds=duracion_timeout), reason="Anti-spam automático")
+                
+                warning = await message.channel.send(f"⚠️ {message.author.mention} ha recibido un **Timeout de {duracion_timeout} segundos** por exceder el límite de mensajes (Spam).")
+                await asyncio.sleep(5)
                 await warning.delete()
-            except:
-                pass
+            except Exception as e:
+                print(f"Error al aplicar timeout: {e}")
             return
 
-    # Comprobación de prefijo de texto
     if message.content.startswith(config_global["prefijo"]):
         contenido = message.content[len(config_global["prefijo"]):].strip().lower()
         if contenido == "ayuda" or contenido == "config":
             await message.channel.send(f"⚙️ El prefijo actual es `{config_global['prefijo']}`. Usa `/configuracion` para gestionar el bot.")
         return
 
-    # Respuesta al mencionar al bot
     if client.user in message.mentions and message.reference is None:
         embed = discord.Embed(
             title="✨ ¡Hola! Soy Nexus Bot — Tu Centro de Control",
@@ -194,8 +191,8 @@ async def on_message(message):
         if client.user.avatar:
             embed.set_thumbnail(url=client.user.avatar.url)
 
-        embed.add_field(name="🛠️ Configuración", value=f"• `/configuracion` ➜ Menú desplegable para roles, canal de respuestas, anti-spam y formularios.", inline=False)
-        embed.add_field(name="📋 Postulaciones", value="• `/postulacion` ➜ Menú único desplegable para iniciar postulaciones visibles para todos.", inline=False)
+        embed.add_field(name="🛠️ Configuración", value=f"• `/configuracion` ➜ Menú para roles, canal de respuestas, anti-spam y panel de formularios.", inline=False)
+        embed.add_field(name="📋 Postulaciones", value="• `/postulacion` ➜ Menú desplegable para iniciar postulaciones públicas.", inline=False)
         embed.add_field(name="🎯 Zona de Juegos", value="• `/juegos` • `/trivia` • `/ppt` • `/dado`", inline=False)
         embed.set_footer(text=f"Solicitado por {message.author.display_name}", icon_url=message.author.display_avatar.url)
         await message.channel.send(embed=embed)
@@ -250,12 +247,13 @@ class ModalConfigFormulario(discord.ui.Modal):
         await interaction.response.send_message(f"✅ ¡Formulario de **{self.tipo.upper()}** actualizado! Total de preguntas: **{len(nuevas_preguntas)}**", ephemeral=True)
 
 
-class ModalConfigSistema(discord.ui.Modal, title="Configuración General, Roles y Anti-Spam"):
+class ModalConfigSistema(discord.ui.Modal, title="Configuración General y Anti-Spam"):
     input_prefijo = discord.ui.TextInput(label="Prefijo del Bot (ej: a¡)", default=config_global["prefijo"], required=True, max_length=5)
     rol_cmd_id = discord.ui.TextInput(label="ID Rol Ejecutar Postulación", default=str(config_global["rol_comandos_id"] or ""), required=False, max_length=20)
     rol_atc_id = discord.ui.TextInput(label="ID Rol Staff (Aprobar/Rechazar)", default=str(config_global["rol_atencion_id"] or ""), required=False, max_length=20)
     canal_log_id = discord.ui.TextInput(label="ID Canal de Respuestas Públicas", default=str(config_global["canal_logs_id"] or ""), required=False, max_length=20)
     antispam_msj = discord.ui.TextInput(label="Anti-Spam: Máx msgs permitidos", default=str(config_global["antispam_limite_mensajes"]), required=True, max_length=3)
+    antispam_time = discord.ui.TextInput(label="Timeout por Spam (Segundos)", default=str(config_global["antispam_timeout_segundos"]), required=True, max_length=5)
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -264,24 +262,49 @@ class ModalConfigSistema(discord.ui.Modal, title="Configuración General, Roles 
             config_global["rol_atencion_id"] = int(self.rol_atc_id.value.strip()) if self.rol_atc_id.value.strip() else None
             config_global["canal_logs_id"] = int(self.canal_log_id.value.strip()) if self.canal_log_id.value.strip() else None
             config_global["antispam_limite_mensajes"] = int(self.antispam_msj.value.strip())
+            config_global["antispam_timeout_segundos"] = int(self.antispam_time.value.strip())
 
-            await interaction.response.send_message("✅ ¡Configuración general y parámetros anti-spam guardados con éxito!", ephemeral=True)
+            await interaction.response.send_message("✅ ¡Configuración general y parámetros de timeout guardados con éxito!", ephemeral=True)
         except ValueError:
-            await interaction.response.send_message("❌ Error: Asegúrate de ingresar valores numéricos válidos en los IDs y límites.", ephemeral=True)
+            await interaction.response.send_message("❌ Error: Asegúrate de ingresar valores numéricos válidos.", ephemeral=True)
 
 
-# --- MENÚ DESPLEGABLE (SELECT MENU) PARA CONFIGURACIÓN ---
+# --- PANEL DE FORMULARIOS CON BOTONES ---
+
+class VistaBotonesFormularios(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="📝 Staff", style=discord.ButtonStyle.primary, row=0)
+    async def btn_staff(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
+        await interaction.response.send_modal(ModalConfigFormulario("staff", "Moderación"))
+
+    @discord.ui.button(label="🤝 Casa Alianza", style=discord.ButtonStyle.primary, row=0)
+    async def btn_ally(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
+        await interaction.response.send_modal(ModalConfigFormulario("ally", "Casa Alianza"))
+
+    @discord.ui.button(label="🎨 Redes", style=discord.ButtonStyle.primary, row=1)
+    async def btn_redes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
+        await interaction.response.send_modal(ModalConfigFormulario("redes", "Cuerpo de Redes"))
+
+    @discord.ui.button(label="💻 Programación (Nexus)", style=discord.ButtonStyle.primary, row=1)
+    async def btn_nexus(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
+        await interaction.response.send_modal(ModalConfigFormulario("nexus", "Programación (Nexus)"))
+
+
+# --- MENÚ DESPLEGABLE PRINCIPAL DE CONFIGURACIÓN ---
 
 class SelectorConfiguracion(discord.ui.Select):
     def __init__(self):
         options = [
-            discord.SelectOption(label="Prefijo, Roles, Canal de Respuestas y Anti-Spam", description="Ajusta seguridad, canal público y protección contra spam", emoji="⚙️", value="sistema"),
-            discord.SelectOption(label="Formulario: Staff", description="Edita título, color y preguntas de Moderación", emoji="📝", value="staff"),
-            discord.SelectOption(label="Formulario: Casa Alianza", description="Edita título, color y preguntas de Alianza", emoji="🤝", value="ally"),
-            discord.SelectOption(label="Formulario: Redes", description="Edita título, color y preguntas de Redes", emoji="🎨", value="redes"),
-            discord.SelectOption(label="Formulario: Programación (Nexus)", description="Edita título, color y preguntas de Nexus", emoji="💻", value="nexus")
+            discord.SelectOption(label="Prefijo, Roles, Canal de Respuestas y Anti-Spam", description="Ajusta seguridad, canal y tiempo de timeout", emoji="⚙️", value="sistema"),
+            discord.SelectOption(label="Configurar Formularios (Staff, Ally, Redes, Nexus)", description="Abre el panel con botones para editar preguntas", emoji="📝", value="formularios")
         ]
-        super().__init__(placeholder="Elige una opción de configuración...", min_values=1, max_values=1, options=options)
+        super().__init__(placeholder="Elige una sección de configuración...", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
         val = self.values[0]
@@ -290,14 +313,13 @@ class SelectorConfiguracion(discord.ui.Select):
 
         if val == "sistema":
             await interaction.response.send_modal(ModalConfigSistema())
-        elif val == "staff":
-            await interaction.response.send_modal(ModalConfigFormulario("staff", "Moderación"))
-        elif val == "ally":
-            await interaction.response.send_modal(ModalConfigFormulario("ally", "Casa Alianza"))
-        elif val == "redes":
-            await interaction.response.send_modal(ModalConfigFormulario("redes", "Cuerpo de Redes"))
-        elif val == "nexus":
-            await interaction.response.send_modal(ModalConfigFormulario("nexus", "Programación (Nexus)"))
+        elif val == "formularios":
+            embed_forms = discord.Embed(
+                title="📝 Panel de Configuración de Formularios",
+                description="Haz clic en cualquiera de los botones inferiores para editar los títulos, colores y preguntas de cada formulario:",
+                color=0x2ECC71
+            )
+            await interaction.response.send_message(embed=embed_forms, view=VistaBotonesFormularios(), ephemeral=True)
 
 
 class VistaMenuConfiguracion(discord.ui.View):
@@ -306,7 +328,7 @@ class VistaMenuConfiguracion(discord.ui.View):
         self.add_item(SelectorConfiguracion())
 
 
-# --- FLUJO DE POSTULACIONES (VISIBLES PARA TODOS) ---
+# --- FLUJO DE POSTULACIONES (100% PÚBLICAS) ---
 
 class VistaComenzarPostulacion(discord.ui.View):
     def __init__(self, tipo: str, num_id: int, preguntas: list, miembro_postulado: discord.Member, config_form: dict):
@@ -353,12 +375,11 @@ class VistaComenzarPostulacion(discord.ui.View):
             embed_final.set_thumbnail(url=self.miembro_postulado.display_avatar.url)
             embed_final.set_footer(text="Esperando revisión del Staff.")
 
-            # ENVIAR AL CANAL PÚBLICO PARA QUE TODOS LO VEAN
             destino_canal = interaction.guild.get_channel(config_global["canal_logs_id"]) if config_global["canal_logs_id"] else interaction.channel
             if destino_canal:
                 await destino_canal.send(embed=embed_final, view=VistaRevisionPostulacion(self.miembro_postulado))
 
-            await self.miembro_postulado.send("🎉 ¡Postulación completada y publicada en el servidor para revisión del staff y la comunidad!")
+            await self.miembro_postulado.send("🎉 ¡Postulación completada y publicada en el servidor para revisión!")
 
         except asyncio.TimeoutError:
             await self.miembro_postulado.send("⏰ Tiempo agotado para responder el formulario.")
@@ -421,8 +442,6 @@ class VistaRevisionPostulacion(discord.ui.View):
         await interaction.response.send_modal(ModalNotaStaff("RECHAZADO", self.autor_postulacion))
 
 
-# --- SELECTOR DE POSTULACIONES (COMANDO ÚNICO /POSTULACION) ---
-
 class SelectorPostulaciones(discord.ui.Select):
     def __init__(self, miembro: discord.Member):
         self.miembro = miembro
@@ -450,7 +469,8 @@ class SelectorPostulaciones(discord.ui.Select):
         )
         embed.set_thumbnail(url=self.miembro.display_avatar.url)
 
-        await interaction.response.edit_message(content=f"✅ Formulario creado para {self.miembro.mention}:", embed=embed, view=VistaComenzarPostulacion(tipo, num_id, preguntas, self.miembro, config_form))
+        await interaction.channel.send(content=f"📋 Panel de postulación creado para {self.miembro.mention}:", embed=embed, view=VistaComenzarPostulacion(tipo, num_id, preguntas, self.miembro, config_form))
+        await interaction.response.send_message("✅ Panel de postulación enviado al canal público.", ephemeral=True)
 
 
 class VistaMenuPostulacion(discord.ui.View):
@@ -470,16 +490,14 @@ async def postulacion(interaction: discord.Interaction, miembro: discord.Member)
         description=f"Selecciona en el menú desplegable de abajo el tipo de formulario que deseas abrir para **{miembro.display_name}**:",
         color=0x3498DB
     )
-    await interaction.response.send_message(embed=embed, view=VistaMenuPostulacion(miembro), ephemeral=True)
+    await interaction.channel.send(embed=embed, view=VistaMenuPostulacion(miembro))
+    await interaction.response.send_message("✅ Menú de postulación generado.", ephemeral=True)
 
-
-# --- COMANDO DE CONFIGURACIÓN CON MENÚ DESPLEGABLE ---
 
 @client.tree.command(name="configuracion", description="Panel de configuración general con menú desplegable")
 async def configuracion(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
     if not interaction.user.guild_permissions.administrator:
-        return await interaction.followup.send("❌ Solo administradores.", ephemeral=True)
+        return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
 
     r_cmd = interaction.guild.get_role(config_global["rol_comandos_id"]) if config_global["rol_comandos_id"] else "No asignado"
     r_atc = interaction.guild.get_role(config_global["rol_atencion_id"]) if config_global["rol_atencion_id"] else "No asignado"
@@ -487,13 +505,14 @@ async def configuracion(interaction: discord.Interaction):
 
     embed = discord.Embed(
         title="⚙️ Panel de Configuración General",
-        description=f"Prefijo actual: `{config_global['prefijo']}`\nAnti-spam: `{'Activado' if config_global['antispam_activo'] else 'Desactivado'}` (Límite: {config_global['antispam_limite_mensajes']} msgs)\n\nUsa el menú desplegable de abajo para editar.",
+        description=f"Prefijo actual: `{config_global['prefijo']}`\nAnti-spam: `{'Activado' if config_global['antispam_activo'] else 'Desactivado'}` (Límite: {config_global['antispam_limite_mensajes']} msgs | Timeout: {config_global['antispam_timeout_segundos']}s)\n\nUsa el menú desplegable de abajo para editar.",
         color=0x3498db
     )
     embed.add_field(name="🛡️ Seguridad y Roles", value=f"• **Ejecutar Postulaciones:** {r_cmd.mention if isinstance(r_cmd, discord.Role) else r_cmd}\n• **Revisar / Staff:** {r_atc.mention if isinstance(r_atc, discord.Role) else r_atc}", inline=False)
     embed.add_field(name="📢 Canales", value=f"• **Canal Público de Respuestas:** {c_log.mention if isinstance(c_log, discord.TextChannel) else c_log}", inline=False)
 
-    await interaction.followup.send(embed=embed, view=VistaMenuConfiguracion(), ephemeral=True)
+    await interaction.channel.send(embed=embed, view=VistaMenuConfiguracion())
+    await interaction.response.send_message("✅ Panel de configuración abierto en el canal.", ephemeral=True)
 
 
 # ==========================================
@@ -507,7 +526,8 @@ async def juegos(interaction: discord.Interaction):
         description=config_global["embed_juegos_desc"] + "\n\n**Comandos:**\n• `/dado` • `/ppt` • `/trivia`",
         color=config_global["embed_juegos_color"]
     )
-    await interaction.response.send_message(embed=embed)
+    await interaction.channel.send(embed=embed)
+    await interaction.response.send_message("✅ Menú de juegos enviado.", ephemeral=True)
 
 @client.tree.command(name="dado", description="Lanza un dado")
 @app_commands.describe(caras="Caras del dado")
@@ -589,9 +609,9 @@ class SelectorCategoriaTrivia(discord.ui.Select):
         embed = discord.Embed(title=f"🧠 Trivia: {t['cat']}", description=f"**{t['p']}**\n\n*20 segundos para responder 🌸*", color=0x9B59B6)
         embed.set_image(url=t["img"])
         view = VistaTriviaPublica(t)
-        await interaction.response.edit_message(content=f"✅ Trivia de **{cat}** iniciada:", embed=None, view=None)
-        msg = await interaction.channel.send(embed=embed, view=view)
-        view.message = msg
+        
+        await interaction.channel.send(content=f"✅ Trivia de **{cat}** iniciada por {interaction.user.mention}:", embed=embed, view=view)
+        await interaction.response.send_message("✅ Trivia iniciada.", ephemeral=True)
 
 
 class VistaMenuTrivia(discord.ui.View):
@@ -601,7 +621,8 @@ class VistaMenuTrivia(discord.ui.View):
 @client.tree.command(name="trivia", description="Trivia pública con botones y GIF")
 async def trivia(interaction: discord.Interaction):
     embed = discord.Embed(title="🧠 Selector de Trivia", description="Elige la categoría:", color=0x3498DB)
-    await interaction.response.send_message(embed=embed, view=VistaMenuTrivia(), ephemeral=True)
+    await interaction.channel.send(embed=embed, view=VistaMenuTrivia())
+    await interaction.response.send_message("✅ Selector de trivia enviado.", ephemeral=True)
 
 
 client.run(os.environ['DISCORD_TOKEN'])
