@@ -4,10 +4,11 @@ import asyncio
 import discord
 from discord import app_commands
 
-# Configuración global del bot
+# Configuración global del bot y canales/roles
 config_global = {
     "rol_comandos_id": None,  
     "rol_atencion_id": None,   
+    "canal_logs_id": None,     # Canal donde se envían los resultados de postulaciones
     "contador_postulaciones": 0, 
     "embed_juegos_titulo": "🎮 Zona de Juegos e Interacción",
     "embed_juegos_desc": "¡Diviértete con los minijuegos multijugador y nuestra trivia masiva estilo Nekotrivia!",
@@ -38,9 +39,8 @@ postulaciones_config = {
     }
 }
 
-# 🧠 BANCO DE TRIVIA CON OPCIONES MÚLTIPLES ESTILO NEKOTRIVIA
+# 🧠 BANCO DE TRIVIA LIMPIO Y SIN NÚMEROS ESTILO NEKOTRIVIA
 BANCO_TRIVIA = [
-    # ANIME
     {
         "p": "¿Cómo se llama el protagonista de Dragon Ball que come sin parar?",
         "correcta": "Goku",
@@ -97,7 +97,6 @@ BANCO_TRIVIA = [
         "cat": "Anime",
         "img": "https://media.giphy.com/media/13sL05U54IPEek/giphy.gif"
     },
-    # HISTORIA
     {
         "p": "¿Qué civilización construyó la majestuosa ciudad de Machu Picchu?",
         "correcta": "Inca",
@@ -125,36 +124,21 @@ BANCO_TRIVIA = [
         "opciones": ["Imperio Griego", "Imperio Persa", "Imperio Romano", "Imperio Otomano"],
         "cat": "Historia",
         "img": "https://media.giphy.com/media/xT5LMGvD9WivxcK9c4/giphy.gif"
-    },
-    {
-        "p": "¿En qué año se produjo la histórica caída del Muro de Berlín?",
-        "correcta": "1989",
-        "opciones": ["1975", "1989", "1991", "1984"],
-        "cat": "Historia",
-        "img": "https://media.giphy.com/media/10Uv418K40lM2s/giphy.gif"
-    },
-    {
-        "p": "¿Qué navegante europeo llegó al continente americano en 1492?",
-        "correcta": "Cristóbal Colón",
-        "opciones": ["Américo Vespucio", "Hernán Cortés", "Cristóbal Colón", "Magallanes"],
-        "cat": "Historia",
-        "img": "https://media.giphy.com/media/3o7TKWpu2WEWYPWLOE/giphy.gif"
     }
 ]
 
-# Ampliación masiva automática de preguntas estilo Nekotrivia
 for i in range(290):
     if i % 2 == 0:
         BANCO_TRIVIA.append({
-            "p": f"¿Este personaje o serie de anime #{i+1} es sumamente popular en Japón?",
+            "p": "Cultura Otaku: ¿Este personaje o serie es sumamente popular globalmente?",
             "correcta": "Sí",
-            "opciones": ["Sí", "No", "Tal vez", "Desconocido"],
+            "opciones": ["Sí", "No", "Tal vez", "Falso"],
             "cat": "Anime",
             "img": "https://media.giphy.com/media/cb9aF9tDyiRkY/giphy.gif"
         })
     else:
         BANCO_TRIVIA.append({
-            "p": f"¿Este evento histórico mundial #{i+1} transformó el curso de la humanidad?",
+            "p": "Acontecimiento Histórico: ¿Este evento cambió radicalmente el mundo?",
             "correcta": "Sí",
             "opciones": ["Sí", "No", "Fue menor", "Ficción"],
             "cat": "Historia",
@@ -179,7 +163,6 @@ client = Bot()
 async def on_ready():
     print(f'¡Bot conectado con éxito como {client.user}!')
 
-# --- EVENTO: EMBED AL MENCIONAR AL BOT ---
 @client.event
 async def on_message(message):
     if message.author.bot:
@@ -196,27 +179,31 @@ async def on_message(message):
 
         embed.add_field(name="🛠️ Configuración", value="• `/configuracion` ➜ Roles y diseño de embeds.", inline=False)
         embed.add_field(name="📋 Postulaciones Seguras", value="• `/postulacion_staff` | `/postulacion_casa-ally` | `/postulaicon_redes` | `/postulacion_nexus`\n*✨ Solo el postulante asignado puede responder.*", inline=False)
-        embed.add_field(name="🎯 Zona de Juegos Multijugador", value="• `/juegos` • `/dado [caras]` • `/ppt [usuario]` • `/trivia` • `/adivina_palabra` • `/colgado`", inline=False)
+        embed.add_field(name="🎯 Zona de Juegos Multijugador", value="• `/juegos` • `/dado` • `/ppt` • `/trivia` • `/adivina_palabra` • `/colgado`", inline=False)
         embed.set_footer(text=f"Solicitado por {message.author.display_name}", icon_url=message.author.display_avatar.url)
         await message.channel.send(embed=embed)
 
 
 def verificar_permisos_comandos(interaction: discord.Interaction) -> bool:
-    if interaction.user.guild_permissions.administrator: return True
+    if interaction.user.guild_permissions.administrator: 
+        return True
     if config_global["rol_comandos_id"]:
         rol = interaction.guild.get_role(config_global["rol_comandos_id"])
-        if rol and rol in interaction.user.roles: return True
+        if rol and rol in interaction.user.roles: 
+            return True
     return False
 
 def verificar_permisos_atencion(interaction: discord.Interaction) -> bool:
-    if interaction.user.guild_permissions.administrator: return True
+    if interaction.user.guild_permissions.administrator: 
+        return True
     if config_global["rol_atencion_id"]:
         rol = interaction.guild.get_role(config_global["rol_atencion_id"])
-        if rol and rol in interaction.user.roles: return True
+        if rol and rol in interaction.user.roles: 
+            return True
     return False
 
 
-# --- MODALES DE CONFIGURACIÓN ---
+# --- MODALES DE CONFIGURACIÓN DE FORMULARIOS Y ROLES ---
 
 class ModalConfigFormulario(discord.ui.Modal):
     def __init__(self, tipo: str, nombre_bonito: str):
@@ -243,6 +230,27 @@ class ModalConfigFormulario(discord.ui.Modal):
         await interaction.response.send_message(f"✅ ¡Formulario de **{self.tipo.upper()}** actualizado!", ephemeral=True)
 
 
+class ModalConfigRolesCanal(discord.ui.Modal, title="Configurar Roles y Canal de Logs"):
+    rol_cmd_id = discord.ui.TextInput(label="ID Rol Ejecutar Postulación", default=str(config_global["rol_comandos_id"] or ""), required=False, max_length=20)
+    rol_atc_id = discord.ui.TextInput(label="ID Rol Staff (Aprobar/Rechazar)", default=str(config_global["rol_atencion_id"] or ""), required=False, max_length=20)
+    canal_log_id = discord.ui.TextInput(label="ID Canal de Registro / Logs", default=str(config_global["canal_logs_id"] or ""), required=False, max_length=20)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            if self.rol_cmd_id.value.strip(): config_global["rol_comandos_id"] = int(self.rol_cmd_id.value.strip())
+            else: config_global["rol_comandos_id"] = None
+
+            if self.rol_atc_id.value.strip(): config_global["rol_atencion_id"] = int(self.rol_atc_id.value.strip())
+            else: config_global["rol_atencion_id"] = None
+
+            if self.canal_log_id.value.strip(): config_global["canal_logs_id"] = int(self.canal_log_id.value.strip())
+            else: config_global["canal_logs_id"] = None
+
+            await interaction.response.send_message("✅ ¡Roles y canales de registro actualizados correctamente!", ephemeral=True)
+        except ValueError:
+            await interaction.response.send_message("❌ Asegúrate de ingresar IDs numéricos válidos de Discord.", ephemeral=True)
+
+
 class ModalConfigJuegos(discord.ui.Modal, title="Personalizar Embed de Juegos"):
     titulo = discord.ui.TextInput(label="Título", default=config_global["embed_juegos_titulo"], required=True)
     descripcion = discord.ui.TextInput(label="Descripción", style=discord.TextStyle.paragraph, default=config_global["embed_juegos_desc"], required=True)
@@ -261,33 +269,38 @@ class VistaConfiguracion(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="📝 Config. Staff", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="🛡️ Configurar Roles y Canal", style=discord.ButtonStyle.danger, row=0)
+    async def btn_roles(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ Solo admins.", ephemeral=True)
+        await interaction.response.send_modal(ModalConfigRolesCanal())
+
+    @discord.ui.button(label="📝 Config. Staff", style=discord.ButtonStyle.primary, row=1)
     async def btn_staff(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ Solo admins.", ephemeral=True)
         await interaction.response.send_modal(ModalConfigFormulario("staff", "Moderación"))
 
-    @discord.ui.button(label="📝 Config. Ally", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="📝 Config. Ally", style=discord.ButtonStyle.primary, row=1)
     async def btn_ally(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ Solo admins.", ephemeral=True)
         await interaction.response.send_modal(ModalConfigFormulario("ally", "Alianza"))
 
-    @discord.ui.button(label="📝 Config. Redes", style=discord.ButtonStyle.primary, row=1)
+    @discord.ui.button(label="📝 Config. Redes", style=discord.ButtonStyle.primary, row=2)
     async def btn_redes(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ Solo admins.", ephemeral=True)
         await interaction.response.send_modal(ModalConfigFormulario("redes", "Redes"))
 
-    @discord.ui.button(label="📝 Config. Nexus", style=discord.ButtonStyle.primary, row=1)
+    @discord.ui.button(label="📝 Config. Nexus", style=discord.ButtonStyle.primary, row=2)
     async def btn_nexus(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ Solo admins.", ephemeral=True)
         await interaction.response.send_modal(ModalConfigFormulario("nexus", "Programación"))
 
-    @discord.ui.button(label="🎨 Editar Embed Juegos", style=discord.ButtonStyle.success, row=2)
+    @discord.ui.button(label="🎨 Editar Embed Juegos", style=discord.ButtonStyle.success, row=3)
     async def btn_juegos(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ Solo admins.", ephemeral=True)
         await interaction.response.send_modal(ModalConfigJuegos())
 
 
-# --- POSTULACIONES CON CANDADO DE SEGURIDAD ---
+# --- POSTULACIONES CON CANDADO Y NOTIFICACIÓN MD / CANAL ---
 
 class ModalResponderFormulario(discord.ui.Modal):
     def __init__(self, tipo: str, num_id: int, preguntas: list, miembro_postulado: discord.Member, config_form: dict):
@@ -338,7 +351,7 @@ class VistaBotonResponder(discord.ui.View):
 
 
 class ModalNotaStaff(discord.ui.Modal):
-    def __init__(self, estado: str, autor_postulacion):
+    def __init__(self, estado: str, autor_postulacion: discord.Member):
         super().__init__(title=f"Nota de Postulación ({estado})")
         self.estado = estado
         self.autor_postulacion = autor_postulacion
@@ -354,55 +367,84 @@ class ModalNotaStaff(discord.ui.Modal):
         if self.estado == "APROBADO":
             embed_actual.color = discord.Color.green()
             res = f"✅ **Aprobado** por {interaction.user.mention}"
+            estado_titulo = "¡APROBADO! 🎉"
         else:
             embed_actual.color = discord.Color.red()
             res = f"❌ **Rechazado** por {interaction.user.mention}"
+            estado_titulo = "NO CLASIFICADO / RECHAZADO ❌"
 
         embed_actual.add_field(name="📌 Resultado", value=res, inline=False)
         embed_actual.add_field(name="📝 Nota del Staff", value=nota, inline=False)
+        
+        # 1. Actualizar el mensaje público
         await interaction.message.edit(embed=embed_actual, view=None)
-        await interaction.response.send_message("✅ Postulación procesada.", ephemeral=True)
+
+        # 2. Enviar MD (Mensaje Privado) al candidato
+        try:
+            embed_md = discord.Embed(
+                title=f"📋 Actualización de tu Postulación",
+                description=f"Tu postulación (`{embed_actual.title}`) ha sido evaluada.\n\n**Estado:** {estado_titulo}\n**Nota del Staff:** {nota}",
+                color=embed_actual.color
+            )
+            embed_md.set_footer(text=interaction.guild.name, icon_url=interaction.guild.icon.url if interaction.guild.icon else None)
+            await self.autor_postulacion.send(embed=embed_md)
+        except:
+            pass # Si el usuario tiene los MDs cerrados
+
+        # 3. Enviar copia al canal de registros/logs configurado
+        if config_global["canal_logs_id"]:
+            canal_log = interaction.guild.get_channel(config_global["canal_logs_id"])
+            if canal_log:
+                try:
+                    await canal_log.send(embed=embed_actual)
+                except:
+                    pass
+
+        await interaction.response.send_message("✅ Postulación procesada con éxito, notificada al candidato y registrada.", ephemeral=True)
 
 
 class VistaRevisionPostulacion(discord.ui.View):
-    def __init__(self, autor_postulacion):
+    def __init__(self, autor_postulacion: discord.Member):
         super().__init__(timeout=None)
         self.autor_postulacion = autor_postulacion
 
     @discord.ui.button(label="✅ Aprobado", style=discord.ButtonStyle.success, custom_id="btn_aprobar")
     async def aprobar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not verificar_permisos_atencion(interaction): return await interaction.response.send_message("❌ Sin permisos.", ephemeral=True)
+        if not verificar_permisos_atencion(interaction): return await interaction.response.send_message("❌ No tienes el rol de staff autorizado para revisar.", ephemeral=True)
         await interaction.response.send_modal(ModalNotaStaff("APROBADO", self.autor_postulacion))
 
     @discord.ui.button(label="❌ Rechazado", style=discord.ButtonStyle.danger, custom_id="btn_rechazar")
     async def rechazar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not verificar_permisos_atencion(interaction): return await interaction.response.send_message("❌ Sin permisos.", ephemeral=True)
+        if not verificar_permisos_atencion(interaction): return await interaction.response.send_message("❌ No tienes el rol de staff autorizado para revisar.", ephemeral=True)
         await interaction.response.send_modal(ModalNotaStaff("RECHAZADO", self.autor_postulacion))
 
 
-# --- COMANDOS DE CONFIGURACIÓN Y POSTULACIÓN ---
+# --- COMANDO DE CONFIGURACIÓN CON PANEL VISUAL ---
 
-@client.tree.command(name="configuracion", description="Panel de configuración general")
-@app_commands.describe(rol_comandos="Rol para comandos", rol_atencion="Rol para revisar")
-async def configuracion(interaction: discord.Interaction, rol_comandos: discord.Role = None, rol_atencion: discord.Role = None):
+@client.tree.command(name="configuracion", description="Panel visual para configurar roles, formularios, canal de registro y juegos")
+async def configuracion(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     if not interaction.user.guild_permissions.administrator:
-        return await interaction.followup.send("❌ Solo administradores.", ephemeral=True)
+        return await interaction.followup.send("❌ Solo un administrador puede usar este comando.", ephemeral=True)
 
-    texto_roles = ""
-    if rol_comandos:
-        config_global["rol_comandos_id"] = rol_comandos.id
-        texto_roles += f"\n- Comandos: {rol_comandos.mention}"
-    if rol_atencion:
-        config_global["rol_atencion_id"] = rol_atencion.id
-        texto_roles += f"\n- Atención: {rol_atencion.mention}"
+    r_cmd = interaction.guild.get_role(config_global["rol_comandos_id"]) if config_global["rol_comandos_id"] else "No asignado"
+    r_atc = interaction.guild.get_role(config_global["rol_atencion_id"]) if config_global["rol_atencion_id"] else "No asignado"
+    c_log = interaction.guild.get_channel(config_global["canal_logs_id"]) if config_global["canal_logs_id"] else "No asignado"
 
-    embed = discord.Embed(title="⚙️ Configuración del Bot", description=f"Usa los botones para editar formularios y juegos.{texto_roles}", color=0x3498db)
+    embed = discord.Embed(
+        title="⚙️ Panel de Configuración General",
+        description="Utiliza los botones inferiores para configurar los accesos de roles, canales de registro, preguntas de formularios y la zona de juegos.",
+        color=0x3498db
+    )
+    embed.add_field(name="🛡️ Seguridad y Roles", value=f"• **Ejecutar Postulaciones:** {r_cmd.mention if isinstance(r_cmd, discord.Role) else r_cmd}\n• **Revisar / Staff:** {r_atc.mention if isinstance(r_atc, discord.Role) else r_atc}", inline=False)
+    embed.add_field(name="📢 Canales", value=f"• **Canal de Registro (Logs):** {c_log.mention if isinstance(c_log, discord.TextChannel) else c_log}", inline=False)
+
     await interaction.followup.send(embed=embed, view=VistaConfiguracion(), ephemeral=True)
+
 
 async def enviar_anuncio_postulacion(interaction: discord.Interaction, tipo: str, miembro: discord.Member):
     if not verificar_permisos_comandos(interaction):
-        return await interaction.response.send_message("❌ No tienes permisos para usar este comando.", ephemeral=True)
+        return await interaction.response.send_message("❌ No tienes el rol autorizado para ejecutar comandos de postulación.", ephemeral=True)
 
     config_form = postulaciones_config.get(tipo, {})
     preguntas = config_form.get("preguntas", [])
@@ -413,13 +455,13 @@ async def enviar_anuncio_postulacion(interaction: discord.Interaction, tipo: str
 
     embed = discord.Embed(
         title=f"{config_form['titulo']} (#{num_id})",
-        description=f"👤 **Candidato:** {miembro.mention}\n⚡ **Iniciado por:** {interaction.user.mention}\n\n*Solo {miembro.mention} puede hacer clic en el botón inferior.*",
+        description=f"👤 **Candidato:** {miembro.mention}\n⚡ **Iniciado por:** {interaction.user.mention}\n\n*Candado activo: Solo {miembro.mention} puede hacer clic en el botón inferior para responder.*",
         color=config_form['color']
     )
     embed.set_thumbnail(url=miembro.display_avatar.url)
 
     await interaction.channel.send(embed=embed, view=VistaBotonResponder(tipo, num_id, preguntas, miembro, config_form))
-    await interaction.response.send_message(f"✅ ¡Formulario `#{num_id}` enviado al chat!", ephemeral=True)
+    await interaction.response.send_message(f"✅ ¡Formulario `#{num_id}` enviado al canal!", ephemeral=True)
 
 @client.tree.command(name="postulacion_staff", description="Postulación a Moderación")
 @app_commands.describe(miembro="Usuario a postular")
@@ -439,7 +481,7 @@ async def postulacion_nexus(interaction: discord.Interaction, miembro: discord.M
 
 
 # ==========================================
-# 🎮 ZONA DE JUEGOS Y TRIVIA PÚBLICA ESTILO NEKOTRIVIA
+# 🎮 ZONA DE JUEGOS Y TRIVIA PÚBLICA
 # ==========================================
 
 @client.tree.command(name="juegos", description="Menú principal de juegos")
@@ -498,8 +540,6 @@ class VistaRetoPPT(discord.ui.View):
         await interaction.response.send_message(f"⚔️ **Duelo PPT**:\n{self.retador.mention} vs {self.retado.mention}\n\n{res}")
 
 
-# --- VISTA Y BOTONES DE ALTERNATIVAS PARA LA TRIVIA PÚBLICA ---
-
 class VistaTriviaPublica(discord.ui.View):
     def __init__(self, pregunta_data: dict, autor: discord.Member):
         super().__init__(timeout=20)
@@ -507,22 +547,17 @@ class VistaTriviaPublica(discord.ui.View):
         self.autor = autor
         self.respondido = False
 
-        # Mezclar opciones aleatoriamente para los botones
         opciones = pregunta_data["opciones"].copy()
         random.shuffle(opciones)
 
-        # Crear un botón por cada alternativa
         for op in opciones:
             self.add_item(BotonAlternativa(op, pregunta_data["correcta"], self))
 
     async def on_timeout(self):
         if not self.respondido:
-            for child in self.children:
-                child.disabled = True
-            try:
-                await self.message.edit(view=self)
-            except:
-                pass
+            for child in self.children: child.disabled = True
+            try: await self.message.edit(view=self)
+            except: pass
 
 
 class BotonAlternativa(discord.ui.Button):
@@ -537,13 +572,10 @@ class BotonAlternativa(discord.ui.Button):
 
         self.vista_padre.respondido = True
         
-        # Deshabilitar todos los botones
         for child in self.vista_padre.children:
             child.disabled = True
-            if child.label == self.correcta:
-                child.style = discord.ButtonStyle.success # Poner en verde la correcta
-            elif child.label == self.label and child.label != self.correcta:
-                child.style = discord.ButtonStyle.danger # Poner en rojo si falló
+            if child.label == self.correcta: child.style = discord.ButtonStyle.success
+            elif child.label == self.label and child.label != self.correcta: child.style = discord.ButtonStyle.danger
 
         embed_actual = interaction.message.embeds[0]
         
@@ -555,12 +587,9 @@ class BotonAlternativa(discord.ui.Button):
             embed_actual.color = discord.Color.red()
 
         embed_actual.add_field(name="🏆 Resultado", value=resultado_texto, inline=False)
-
         await interaction.message.edit(embed=embed_actual, view=self.vista_padre)
         await interaction.response.send_message(f"¡Has seleccionado **{self.label}**!", ephemeral=True)
 
-
-# --- SELECTOR DE CATEGORÍA PARA TRIVIA ---
 
 class SelectorCategoriaTrivia(discord.ui.Select):
     def __init__(self):
@@ -584,8 +613,6 @@ class SelectorCategoriaTrivia(discord.ui.Select):
         embed.set_footer(text=f"Trivia solicitada por {interaction.user.display_name}")
 
         view = VistaTriviaPublica(t, interaction.user)
-        
-        # Enviar al chat público para todos
         await interaction.response.edit_message(content=f"✅ Trivia de **{categoria}** iniciada en el canal:", embed=None, view=None)
         
         mensaje_publico = await interaction.channel.send(embed=embed, view=view)
@@ -644,7 +671,7 @@ async def adivina_palabra(interaction: discord.Interaction):
     if "_" not in ocultas:
         await interaction.edit_original_response(content=f"🎉 ¡Victoria {interaction.user.mention}! La palabra era **{secreta}**.")
     else:
-        await interaction.edit_original_response(content=f"💀 ¡Perdiste! La palabra era **{secreta}**.")
+        await interaction.edit_original_response(content=f"💀 ¡Perdiste! Era **{secreta}**.")
 
 
 @client.tree.command(name="colgado", description="El clásico juego del ahorcado")
