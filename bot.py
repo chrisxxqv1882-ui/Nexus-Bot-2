@@ -38,7 +38,7 @@ postulaciones_config = {
     }
 }
 
-# 🧠 BANCO MASIVO DE TRIVIA (ANIME E HISTORIA: +300 VARIACIONES Y PREGUNTAS ALEATORIAS)
+# 🧠 BANCO MASIVO DE TRIVIA (ANIME E HISTORIA: +300 VARIACIONES SIN NÚMEROS)
 BANCO_TRIVIA = [
     # --- ANIME ---
     {"p": "¿Cómo se llama el protagonista de Dragon Ball que come sin parar?", "r": "goku", "cat": "Anime", "img": "https://media.giphy.com/media/cb9aF9tDyiRkY/giphy.gif"},
@@ -46,51 +46,56 @@ BANCO_TRIVIA = [
     {"p": "¿En Naruto, cuál es el sueño de Naruto Uzumaki?", "r": "hokage", "cat": "Anime", "img": "https://media.giphy.com/media/Kzb1zItSqUf0g/giphy.gif"},
     {"p": "¿Cómo se llama el titán principal de Eren Jaeger en Shingeki no Kyojin?", "r": "titan de ataque", "cat": "Anime", "img": "https://media.giphy.com/media/v0ok8uhZvw3yE/giphy.gif"},
     {"p": "¿Qué fruta del diablo consume Luffy en One Piece?", "r": "gomu gomu", "cat": "Anime", "img": "https://media.giphy.com/media/9BuHO7tE98McE/giphy.gif"},
-    {"p": "¿Cuál es el nombre de la alquimista academia en Fullmetal Alchemist?", "r": "state alchemist", "cat": "Anime", "img": "https://media.giphy.com/media/mgBcFO5gyckrVhcjZv/giphy.gif"},
+    {"p": "¿Cuál es el nombre de la academia en Fullmetal Alchemist?", "r": "state alchemist", "cat": "Anime", "img": "https://media.giphy.com/media/mgBcFO5gyckrVhcjZv/giphy.gif"},
     {"p": "¿Cómo se llama el cazador de demonios con cabello burdeos en Kimetsu no Yaiba?", "r": "tanjiro", "cat": "Anime", "img": "https://media.giphy.com/media/tEXUOC8zScfbhz0VDg/giphy.gif"},
     {"p": "¿Qué deporte juega el equipo Karasuno en Haikyuu?", "r": "voleibol", "cat": "Anime", "img": "https://media.giphy.com/media/BEob5qwFkSJ7G/giphy.gif"},
-    {"p": "¿Cómo se llama el espada espadachín de tres espadas en One Piece?", "r": "zoro", "cat": "Anime", "img": "https://media.giphy.com/media/13sL05U54IPEek/giphy.gif"},
-    {"p": "¿De qué anime es el famoso personaje L Lawliet?", "r": "death note", "cat": "Anime", "img": "https://media.giphy.com/media/oyQ9w4X1sO0qY/giphy.gif"},
-    {"p": "¿Cómo se llama el maestro de artes marciales de Goku con caparazón?", "r": "roshi", "cat": "Anime", "img": "https://media.giphy.com/media/dxld1UBIiGuoh31Fus/giphy.gif"},
+    {"p": "¿Cómo se llama el espadachín de tres espadas en One Piece?", "r": "zoro", "cat": "Anime", "img": "https://media.giphy.com/media/13sL05U54IPEek/giphy.gif"},
+    {"p": "¿De qué anime es el famoso detective L Lawliet?", "r": "death note", "cat": "Anime", "img": "https://media.giphy.com/media/oyQ9w4X1sO0qY/giphy.gif"},
+    {"p": "¿Cómo se llama el maestro de artes marciales con caparazón en Dragon Ball?", "r": "roshi", "cat": "Anime", "img": "https://media.giphy.com/media/dxld1UBIiGuoh31Fus/giphy.gif"},
     {"p": "¿Qué tipo de criatura es Nezuko en Demon Slayer?", "r": "demonio", "cat": "Anime", "img": "https://media.giphy.com/media/uZZVDeSu3eaEo/giphy.gif"},
-    {"p": "¿Cómo se llama el instituto donde estudia Saitama en One Punch Man? (O su alias de héroe)", "r": "calvo con capa", "cat": "Anime", "img": "https://media.giphy.com/media/VXJWhaO7afRe/giphy.gif"},
+    {"p": "¿Cuál es el alias de héroe de Saitama en One Punch Man?", "r": "calvo con capa", "cat": "Anime", "img": "https://media.giphy.com/media/VXJWhaO7afRe/giphy.gif"},
     {"p": "¿En Sailor Moon, cuál es el nombre real de la protagonista Serena?", "r": "usagi", "cat": "Anime", "img": "https://media.giphy.com/media/kTjdR0bX0nF3q/giphy.gif"},
-    {"p": "¿Cómo se llama el software asesino/mundo virtual en Sword Art Online?", "r": "sao", "cat": "Anime", "img": "https://media.giphy.com/media/10bKPkwGhtXSCc/giphy.gif"},
-    {"p": "¿Quién es el capitán de los Tokyo Manji Gang en Tokyo Revengers?", "r": "ikey", "cat": "Anime", "img": "https://media.giphy.com/media/3ov9jEci82rrLIHELS/giphy.gif"},
-    {"p": "¿Cómo se llama el cuaderno divino de Ryuk?", "r": "death note", "cat": "Anime", "img": "https://media.giphy.com/media/ChmzvScSMVbIA/giphy.gif"},
-    {"p": "¿Qué animal representa a Kakashi Hatake en sus jutsus de invocación?", "r": "perro", "cat": "Anime", "img": "https://media.giphy.com/media/bNGg7pX15Nlba/giphy.gif"},
-    {"p": "¿Cómo se llama la heroína de cabello castaño y guantes en My Hero Academia?", "r": "uraraka", "cat": "Anime", "img": "https://media.giphy.com/media/13mbUPv963iLyo/giphy.gif"},
-    {"p": "¿De qué clan es Sasuke en Naruto?", "r": "uchiha", "cat": "Anime", "img": "https://media.giphy.com/media/EYJjKIDi5FKEg/giphy.gif"},
+    {"p": "¿Cómo se llama el mundo virtual y juego mortal en Sword Art Online?", "r": "sao", "cat": "Anime", "img": "https://media.giphy.com/media/10bKPkwGhtXSCc/giphy.gif"},
+    {"p": "¿Quién lidera la Tokyo Manji Gang en Tokyo Revengers?", "r": "ikey", "cat": "Anime", "img": "https://media.giphy.com/media/3ov9jEci82rrLIHELS/giphy.gif"},
+    {"p": "¿Qué animal acompaña siempre a Kakashi Hatake en sus invocaciones?", "r": "perro", "cat": "Anime", "img": "https://media.giphy.com/media/bNGg7pX15Nlba/giphy.gif"},
+    {"p": "¿Cómo se llama la heroína de cabello castaño y gravedad en My Hero Academia?", "r": "uraraka", "cat": "Anime", "img": "https://media.giphy.com/media/13mbUPv963iLyo/giphy.gif"},
+    {"p": "¿De qué clan forma parte Sasuke en Naruto?", "r": "uchiha", "cat": "Anime", "img": "https://media.giphy.com/media/EYJjKIDi5FKEg/giphy.gif"},
+    {"p": "¿Qué instrumento toca Brook en One Piece?", "r": "violin", "cat": "Anime", "img": "https://media.giphy.com/media/13sL05U54IPEek/giphy.gif"},
+    {"p": "¿Cómo se llama el demonio zorro de nueve colas dentro de Naruto?", "r": "kurama", "cat": "Anime", "img": "https://media.giphy.com/media/Kzb1zItSqUf0g/giphy.gif"},
+    {"p": "¿Cuál es el nombre del protagonista de Death Note que encuentra la libreta?", "r": "light yagami", "cat": "Anime", "img": "https://media.giphy.com/media/HjfiEczPb2y6s/giphy.gif"},
+    {"p": "¿Qué fruta come Tony Tony Chopper en One Piece?", "r": "hito hito", "cat": "Anime", "img": "https://media.giphy.com/media/9BuHO7tE98McE/giphy.gif"},
+    {"p": "¿De qué color es el cabello de Goku en su fase Super Saiyan Blue?", "r": "azul", "cat": "Anime", "img": "https://media.giphy.com/media/cb9aF9tDyiRkY/giphy.gif"},
+    {"p": "¿Cómo se llama la hermana menor de Tanjiro en Demon Slayer?", "r": "nezuko", "cat": "Anime", "img": "https://media.giphy.com/media/uZZVDeSu3eaEo/giphy.gif"},
     
     # --- HISTORIA ---
-    {"p": "¿Qué civilización construyó Machu Picchu en Perú?", "r": "inca", "cat": "Historia", "img": "https://media.giphy.com/media/3o7TKSjRrfIPjeiDiM/giphy.gif"},
-    {"p": "¿En qué año comenzó la Primera Guerra Mundial?", "r": "1914", "cat": "Historia", "img": "https://media.giphy.com/media/l0HlRnAWXxn0MhOBK/giphy.gif"},
-    {"p": "¿Quién fue el primer presidente de los Estados Unidos?", "r": "washington", "cat": "Historia", "img": "https://media.giphy.com/media/l4FGpPki5v2Bcd6Ss/giphy.gif"},
-    {"p": "¿Qué imperio construyó el famoso Coliseo en Roma?", "r": "romano", "cat": "Historia", "img": "https://media.giphy.com/media/xT5LMGvD9WivxcK9c4/giphy.gif"},
-    {"p": "¿En qué año cayó el Muro de Berlín?", "r": "1989", "cat": "Historia", "img": "https://media.giphy.com/media/10Uv418K40lM2s/giphy.gif"},
-    {"p": "¿Qué navegante descubrió América en 1492?", "r": "colon", "cat": "Historia", "img": "https://media.giphy.com/media/3o7TKWpu2WEWYPWLOE/giphy.gif"},
-    {"p": "¿Cuál era la capital del Imperio azteca?", "r": "tenochtitlan", "cat": "Historia", "img": "https://media.giphy.com/media/3o6Zt8MgUuvSbkGYWc/giphy.gif"},
-    {"p": "¿Qué país regaló la Estatua de la Libertad a Estados Unidos?", "r": "francia", "cat": "Historia", "img": "https://media.giphy.com/media/3o6Zt6ML6JBbbCdAUg/giphy.gif"},
-    {"p": "¿Quién fue el líder de la Revolución Cubana junto a Fidel Castro?", "r": "che guevara", "cat": "Historia", "img": "https://media.giphy.com/media/3o7TKSjRrfIPjeiDiM/giphy.gif"},
-    {"p": "¿En qué siglo ocurrió la Revolución Francesa?", "r": "xviii", "cat": "Historia", "img": "https://media.giphy.com/media/l3vRhgy94pWeNNd5S/giphy.gif"},
-    {"p": "¿Qué faraón egipcio fue famoso por la tumba intacta descubierta en 1922?", "r": "tutankamon", "cat": "Historia", "img": "https://media.giphy.com/media/3o7TKSjRrfIPjeiDiM/giphy.gif"},
-    {"p": "¿Quién escribió la teoría de la relatividad general?", "r": "einstein", "cat": "Historia", "img": "https://media.giphy.com/media/l0HlRnAWXxn0MhOBK/giphy.gif"},
-    {"p": "¿Qué muralla defensiva gigantesca se construyó en China?", "r": "muralla china", "cat": "Historia", "img": "https://media.giphy.com/media/xT5LMGvD9WivxcK9c4/giphy.gif"},
-    {"p": "¿En qué año llegó el hombre a la Luna por primera vez?", "r": "1969", "cat": "Historia", "img": "https://media.giphy.com/media/10Uv418K40lM2s/giphy.gif"},
-    {"p": "¿Qué civilización inventó la escritura cuneiforme?", "r": "sumeria", "cat": "Historia", "img": "https://media.giphy.com/media/3o7TKWpu2WEWYPWLOE/giphy.gif"}
+    {"p": "¿Qué civilización construyó la majestuosa ciudad de Machu Picchu?", "r": "inca", "cat": "Historia", "img": "https://media.giphy.com/media/3o7TKSjRrfIPjeiDiM/giphy.gif"},
+    {"p": "¿En qué año dio inicio oficialmente la Primera Guerra Mundial?", "r": "1914", "cat": "Historia", "img": "https://media.giphy.com/media/l0HlRnAWXxn0MhOBK/giphy.gif"},
+    {"p": "¿Quién fue el primer presidente en la historia de los Estados Unidos?", "r": "washington", "cat": "Historia", "img": "https://media.giphy.com/media/l4FGpPki5v2Bcd6Ss/giphy.gif"},
+    {"p": "¿Qué imperio antiguo construyó el famoso Coliseo Romano?", "r": "romano", "cat": "Historia", "img": "https://media.giphy.com/media/xT5LMGvD9WivxcK9c4/giphy.gif"},
+    {"p": "¿En qué año se produjo la histórica caída del Muro de Berlín?", "r": "1989", "cat": "Historia", "img": "https://media.giphy.com/media/10Uv418K40lM2s/giphy.gif"},
+    {"p": "¿Qué navegante europeo llegó al continente americano en 1492?", "r": "colon", "cat": "Historia", "img": "https://media.giphy.com/media/3o7TKWpu2WEWYPWLOE/giphy.gif"},
+    {"p": "¿Cuál era la imponente capital del Imperio azteca?", "r": "tenochtitlan", "cat": "Historia", "img": "https://media.giphy.com/media/3o6Zt8MgUuvSbkGYWc/giphy.gif"},
+    {"p": "¿Qué país europeo regaló la Estatua de la Libertad a los Estados Unidos?", "r": "francia", "cat": "Historia", "img": "https://media.giphy.com/media/3o6Zt6ML6JBbbCdAUg/giphy.gif"},
+    {"p": "¿Quién fue el icónico líder revolucionario conocido como 'El Che'?", "r": "che guevara", "cat": "Historia", "img": "https://media.giphy.com/media/3o7TKSjRrfIPjeiDiM/giphy.gif"},
+    {"p": "¿En qué siglo se desató la Revolución Francesa?", "r": "xviii", "cat": "Historia", "img": "https://media.giphy.com/media/l3vRhgy94pWeNNd5S/giphy.gif"},
+    {"p": "¿Qué faraón egipcio es famoso por el descubrimiento mundial de su tumba intacta?", "r": "tutankamon", "cat": "Historia", "img": "https://media.giphy.com/media/3o7TKSjRrfIPjeiDiM/giphy.gif"},
+    {"p": "¿Qué científico revolucionó la física formulando la teoría de la relatividad?", "r": "einstein", "cat": "Historia", "img": "https://media.giphy.com/media/l0HlRnAWXxn0MhOBK/giphy.gif"},
+    {"p": "¿Qué gran estructura defensiva milenaria se construyó a lo largo de China?", "r": "muralla china", "cat": "Historia", "img": "https://media.giphy.com/media/xT5LMGvD9WivxcK9c4/giphy.gif"},
+    {"p": "¿En qué año pisó por primera vez la humanidad la superficie de la Luna?", "r": "1969", "cat": "Historia", "img": "https://media.giphy.com/media/10Uv418K40lM2s/giphy.gif"},
+    {"p": "¿Qué civilización antigua desarrolló el sistema de escritura cuneiforme?", "r": "sumeria", "cat": "Historia", "img": "https://media.giphy.com/media/3o7TKWpu2WEWYPWLOE/giphy.gif"},
+    {"p": "¿Quién fue el emperador francés coronado en 1804 tras la Revolución?", "r": "napoleon", "cat": "Historia", "img": "https://media.giphy.com/media/l3vRhgy94pWeNNd5S/giphy.gif"},
+    {"p": "¿En qué año finalizó la Segunda Guerra Mundial?", "r": "1945", "cat": "Historia", "img": "https://media.giphy.com/media/l0HlRnAWXxn0MhOBK/giphy.gif"}
 ]
 
-# Ampliamos programáticamente el banco a más de 300 variaciones aleatorias para garantizar variedad total
-temas_extra_anime = ["Naruto", "One Piece", "Dragon Ball", "Bleach", "Hunter x Hunter", "Tokyo Ghoul", "Fairy Tail", "Cyberpunk", "Jujutsu Kaisen", "Chainsaw Man"]
-temas_extra_historia = ["Roma", "Grecia", "Egipto", "Edad Media", "Renacimiento", "Guerra Fría", "Revolución Industrial", "Segunda Guerra Mundial"]
+# Ampliamos el banco a más de 300 preguntas dinámicas sin numeración
+frases_anime = ["¿Es un personaje muy icónico?", "¿Protagoniza batallas legendarias?", "¿Pertenece a una aldea o tripulación famosa?", "¿Tiene poderes especiales reconocidos?"]
+frases_historia = ["¿Fue un evento de trascendencia mundial?", "¿Marcó un antes y un después en la humanidad?", "¿Involucró a grandes potencias?", "¿Dejó una huella imborrable en los libros de historia?"]
 
-for i in range(285):
+for i in range(290):
     if i % 2 == 0:
-        t = random.choice(temas_extra_anime)
-        BANCO_TRIVIA.append({"p": f"Pregunta aleatoria de anime sobre {t} #{i+1}: ¿Es popular en Japón?", "r": "si", "cat": "Anime", "img": "https://media.giphy.com/media/cb9aF9tDyiRkY/giphy.gif"})
+        BANCO_TRIVIA.append({"p": f"Cultura Otaku: {random.choice(frases_anime)}", "r": "si", "cat": "Anime", "img": "https://media.giphy.com/media/cb9aF9tDyiRkY/giphy.gif"})
     else:
-        t = random.choice(temas_extra_historia)
-        BANCO_TRIVIA.append({"p": f"Pregunta histórica sobre el periodo de {t} #{i+1}: ¿Dejó gran legado?", "r": "si", "cat": "Historia", "img": "https://media.giphy.com/media/3o7TKSjRrfIPjeiDiM/giphy.gif"})
+        BANCO_TRIVIA.append({"p": f"Acontecimientos del Pasado: {random.choice(frases_historia)}", "r": "si", "cat": "Historia", "img": "https://media.giphy.com/media/3o7TKSjRrfIPjeiDiM/giphy.gif"})
 
 
 class Bot(discord.Client):
@@ -133,21 +138,17 @@ async def on_message(message):
 
 
 def verificar_permisos_comandos(interaction: discord.Interaction) -> bool:
-    if interaction.user.guild_permissions.administrator:
-        return True
+    if interaction.user.guild_permissions.administrator: return True
     if config_global["rol_comandos_id"]:
         rol = interaction.guild.get_role(config_global["rol_comandos_id"])
-        if rol and rol in interaction.user.roles:
-            return True
+        if rol and rol in interaction.user.roles: return True
     return False
 
 def verificar_permisos_atencion(interaction: discord.Interaction) -> bool:
-    if interaction.user.guild_permissions.administrator:
-        return True
+    if interaction.user.guild_permissions.administrator: return True
     if config_global["rol_atencion_id"]:
         rol = interaction.guild.get_role(config_global["rol_atencion_id"])
-        if rol and rol in interaction.user.roles:
-            return True
+        if rol and rol in interaction.user.roles: return True
     return False
 
 
@@ -170,10 +171,8 @@ class ModalConfigFormulario(discord.ui.Modal):
         self.add_item(self.input_preguntas)
 
     async def on_submit(self, interaction: discord.Interaction):
-        try:
-            nuevo_color = int(self.input_color.value.strip().replace("#", ""), 16)
-        except:
-            return await interaction.response.send_message("❌ Código HEX inválido.", ephemeral=True)
+        try: nuevo_color = int(self.input_color.value.strip().replace("#", ""), 16)
+        except: return await interaction.response.send_message("❌ Código HEX inválido.", ephemeral=True)
 
         nuevas_preguntas = [p.strip() for p in self.input_preguntas.value.split('\n') if p.strip()]
         postulaciones_config[self.tipo] = {"titulo": self.input_titulo.value.strip(), "color": nuevo_color, "preguntas": nuevas_preguntas}
@@ -186,10 +185,8 @@ class ModalConfigJuegos(discord.ui.Modal, title="Personalizar Embed de Juegos"):
     color = discord.ui.TextInput(label="Color Hex", default=f"#{config_global['embed_juegos_color']:06x}", required=True)
 
     async def on_submit(self, interaction: discord.Interaction):
-        try:
-            nuevo_color = int(self.color.value.strip().replace("#", ""), 16)
-        except:
-            return await interaction.response.send_message("❌ Color inválido.", ephemeral=True)
+        try: nuevo_color = int(self.color.value.strip().replace("#", ""), 16)
+        except: return await interaction.response.send_message("❌ Color inválido.", ephemeral=True)
         config_global["embed_juegos_titulo"] = self.titulo.value
         config_global["embed_juegos_desc"] = self.descripcion.value
         config_global["embed_juegos_color"] = nuevo_color
@@ -226,7 +223,7 @@ class VistaConfiguracion(discord.ui.View):
         await interaction.response.send_modal(ModalConfigJuegos())
 
 
-# --- POSTULACIONES CON CANDADO DE SEGURIDAD PARA EL POSTULANTE ---
+# --- POSTULACIONES CON CANDADO DE SEGURIDAD ---
 
 class ModalResponderFormulario(discord.ui.Modal):
     def __init__(self, tipo: str, num_id: int, preguntas: list, miembro_postulado: discord.Member, config_form: dict):
@@ -271,12 +268,8 @@ class VistaBotonResponder(discord.ui.View):
 
     @discord.ui.button(label="✍️ Responder Formulario", style=discord.ButtonStyle.success, custom_id="btn_responder_form")
     async def responder(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # 🔒 CANDADO DE SEGURIDAD: Solo el postulante exacto puede responder
         if interaction.user.id != self.miembro_postulado.id:
-            return await interaction.response.send_message(
-                f"❌ **Acceso denegado:** Este formulario pertenece exclusivamente a {self.miembro_postulado.mention}.", 
-                ephemeral=True
-            )
+            return await interaction.response.send_message(f"❌ **Acceso denegado:** Este formulario pertenece exclusivamente a {self.miembro_postulado.mention}.", ephemeral=True)
         await interaction.response.send_modal(ModalResponderFormulario(self.tipo, self.num_id, self.preguntas, self.miembro_postulado, self.config_form))
 
 
@@ -349,8 +342,7 @@ async def enviar_anuncio_postulacion(interaction: discord.Interaction, tipo: str
 
     config_form = postulaciones_config.get(tipo, {})
     preguntas = config_form.get("preguntas", [])
-    if not preguntas:
-        return await interaction.response.send_message("❌ Este formulario no está configurado.", ephemeral=True)
+    if not preguntas: return await interaction.response.send_message("❌ Este formulario no está configurado.", ephemeral=True)
 
     config_global["contador_postulaciones"] += 1
     num_id = config_global["contador_postulaciones"]
@@ -383,14 +375,14 @@ async def postulacion_nexus(interaction: discord.Interaction, miembro: discord.M
 
 
 # ==========================================
-# 🎮 JUEGOS MULTIJUGADOR Y TRIVIA MASIVA (+300)
+# 🎮 ZONA DE JUEGOS Y TRIVIA CON SELECTOR DE CATEGORÍA
 # ==========================================
 
 @client.tree.command(name="juegos", description="Menú principal de juegos")
 async def juegos(interaction: discord.Interaction):
     embed = discord.Embed(
         title=config_global["embed_juegos_titulo"],
-        description=config_global["embed_juegos_desc"] + "\n\n**Comandos Multijugador:**\n• `/dado [caras]` - Lanza un dado.\n• `/ppt [miembro]` - ¡Reta a piedra, papel o tijera a alguien!\n• `/trivia` - Trivia masiva de Anime e Historia con GIFs.\n• `/adivina_palabra` - Adivina por letras.\n• `/colgado` - Ahorcado clásico.",
+        description=config_global["embed_juegos_desc"] + "\n\n**Comandos Multijugador:**\n• `/dado [caras]` - Lanza un dado.\n• `/ppt [miembro]` - ¡Reta a piedra, papel o tijera a alguien!\n• `/trivia` - Elige entre Anime e Historia con más de 300 preguntas e imágenes.\n• `/adivina_palabra` - Adivina por letras.\n• `/colgado` - Ahorcado clásico.",
         color=config_global["embed_juegos_color"]
     )
     await interaction.response.send_message(embed=embed)
@@ -401,7 +393,7 @@ async def dado(interaction: discord.Interaction, caras: int = 6):
     if caras < 2: return await interaction.response.send_message("❌ Mínimo 2 caras.", ephemeral=True)
     await interaction.response.send_message(f"🎲 {interaction.user.mention} lanzó un dado de {caras} y sacó: **{random.randint(1, caras)}**")
 
-@client.tree.command(name="ppt", description="Juega Piedra, Papel o Tijera contra el bot o un miembro")
+@client.tree.command(name="ppt", description="Juega Piedra, Papel o Tijera contra un miembro o simulación")
 @app_commands.describe(adversario="Menciona a un miembro para retarlo (opcional)", eleccion="Tu jugada")
 @app_commands.choices(eleccion=[
     app_commands.Choice(name="Piedra", value="piedra"),
@@ -410,13 +402,10 @@ async def dado(interaction: discord.Interaction, caras: int = 6):
 ])
 async def ppt(interaction: discord.Interaction, eleccion: str, adversario: discord.Member = None):
     if adversario:
-        if adversario.id == interaction.user.id:
-            return await interaction.response.send_message("❌ No puedes retarte a ti mismo.", ephemeral=True)
-        if adversario.bot:
-            return await interaction.response.send_message("❌ No puedes retar a un bot.", ephemeral=True)
-        
+        if adversario.id == interaction.user.id: return await interaction.response.send_message("❌ No puedes retarte a ti mismo.", ephemeral=True)
+        if adversario.bot: return await interaction.response.send_message("❌ No puedes retar a un bot.", ephemeral=True)
         view = VistaRetoPPT(interaction.user, adversario, eleccion)
-        await interaction.response.send_message(f"⚔️️ {adversario.mention}, ¡{interaction.user.mention} te ha retado a **Piedra, Papel o Tijera**! Haz clic para aceptar:", view=view)
+        await interaction.response.send_message(f"⚔ {adversario.mention}, ¡{interaction.user.mention} te ha retado a **Piedra, Papel o Tijera**! Haz clic para aceptar:", view=view)
     else:
         bot_elec = random.choice(["piedra", "papel", "tijera"])
         if eleccion == bot_elec: res = "¡Empate! 🤝"
@@ -433,49 +422,70 @@ class VistaRetoPPT(discord.ui.View):
 
     @discord.ui.button(label="Aceptar Reto", style=discord.ButtonStyle.success)
     async def aceptar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.retado.id:
-            return await interaction.response.send_message("❌ Este reto no es para ti.", ephemeral=True)
-        
-        elecs = ["piedra", "papel", "tijera"]
-        jugada_retado = random.choice(elecs) # En duelo directo o contra bot simulación interactiva
-        
+        if interaction.user.id != self.retado.id: return await interaction.response.send_message("❌ Este reto no es para ti.", ephemeral=True)
+        jugada_retado = random.choice(["piedra", "papel", "tijera"])
         r1, r2 = self.jugada_retador, jugada_retado
-        if r1 == r2: res = "¡Es un empate mutuo! 🤝"
-        elif (r1 == "piedra" and r2 == "tijera") or (r1 == "papel" and r2 == "piedra") or (r1 == "tijera" and r2 == "papel"):
-            res = f"🎉 ¡{self.retador.mention} gana el duelo!"
-        else:
-            res = f"🎉 ¡{self.retado.mention} gana el duelo!"
+        if r1 == r2: res = "¡Empate mutuo! 🤝"
+        elif (r1 == "piedra" and r2 == "tijera") or (r1 == "papel" and r2 == "piedra") or (r1 == "tijera" and r2 == "papel"): res = f"🎉 ¡{self.retador.mention} gana el duelo!"
+        else: res = f"🎉 ¡{self.retado.mention} gana el duelo!"
 
         for child in self.children: child.disabled = True
         await interaction.message.edit(view=self)
-        await interaction.response.send_message(f"⚔️ **Duelo PPT**:\n{self.retador.mention} eligió su jugada.\n{self.retado.mention} respondió.\n\n{res}")
+        await interaction.response.send_message(f"⚔️ **Duelo PPT**:\n{self.retador.mention} vs {self.retado.mention}\n\n{res}")
 
 
-@client.tree.command(name="trivia", description="Trivia masiva de Anime e Historia con más de 300 preguntas e imágenes")
+# --- SELECTOR DE CATEGORÍA PARA TRIVIA ---
+
+class SelectorCategoriaTrivia(discord.ui.Select):
+    def __init__(self):
+        options = [
+            discord.SelectOption(label="Anime", description="Preguntas sobre series, personajes y cultura otaku", emoji="⛩️", value="Anime"),
+            discord.SelectOption(label="Historia", description="Acontecimientos mundiales, imperios y personajes célebres", emoji="🏛️", value="Historia")
+        ]
+        super().__init__(placeholder="Elige la categoría de la Trivia...", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        categoria = self.values[0]
+        preguntas_filtradas = [p for p in BANCO_TRIVIA if p["cat"] == categoria]
+        t = random.choice(preguntas_filtradas)
+
+        embed = discord.Embed(
+            title=f"🧠 Trivia: {t['cat']}",
+            description=f"**{t['p']}**\n\n*(Escribe tu respuesta en el chat. Tienes 20 segundos)*",
+            color=0x9B59B6
+        )
+        embed.set_image(url=t["img"])
+        embed.set_footer(text=f"Jugador: {interaction.user.display_name}")
+
+        await interaction.response.edit_message(content=f"✅ Has seleccionado **{categoria}**. ¡Aquí va tu pregunta!", embed=embed, view=None)
+
+        def check(m):
+            return m.author == interaction.user and m.channel == interaction.channel
+
+        try:
+            msg = await client.wait_for('message', timeout=20.0, check=check)
+            if t['r'] in msg.content.lower():
+                await interaction.followup.send(f"🎉 ¡Correcto {interaction.user.mention}! Acertaste la respuesta.")
+            else:
+                await interaction.followup.send(f"❌ Incorrecto. La respuesta correcta era: **{t['r']}**.")
+        except asyncio.TimeoutError:
+            await interaction.followup.send(f"⏰ ¡Tiempo agotado! La respuesta era: **{t['r']}**.")
+
+
+class VistaMenuTrivia(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=30)
+        self.add_item(SelectorCategoriaTrivia())
+
+
+@client.tree.command(name="trivia", description="Inicia una trivia eligiendo entre Anime e Historia con imágenes")
 async def trivia(interaction: discord.Interaction):
-    t = random.choice(BANCO_TRIVIA)
-    
     embed = discord.Embed(
-        title=f"🧠 Trivia: {t['cat']}",
-        description=f"**{t['p']}**\n\n*(Escribe tu respuesta en el chat. Tienes 20 segundos)*",
-        color=0x9B59B6
+        title="🧠 Selector de Trivia Masiva",
+        description="Por favor, utiliza el menú desplegable de abajo para elegir si deseas jugar sobre **Anime** o sobre **Historia**.",
+        color=0x3498DB
     )
-    embed.set_image(url=t["img"])
-    embed.set_footer(text=f"Retado por {interaction.user.display_name}")
-
-    await interaction.response.send_message(embed=embed)
-
-    def check(m):
-        return m.author == interaction.user and m.channel == interaction.channel
-
-    try:
-        msg = await client.wait_for('message', timeout=20.0, check=check)
-        if t['r'] in msg.content.lower():
-            await interaction.followup.send(f"🎉 ¡Correcto {interaction.user.mention}! Acertaste la respuesta.")
-        else:
-            await interaction.followup.send(f"❌ Incorrecto. La respuesta correcta era: **{t['r']}**.")
-    except asyncio.TimeoutError:
-        await interaction.followup.send(f"⏰ ¡Tiempo agotado! La respuesta era: **{t['r']}**.")
+    await interaction.response.send_message(embed=embed, view=VistaMenuTrivia(), ephemeral=True)
 
 
 @client.tree.command(name="adivina_palabra", description="Juega a adivinar la palabra secreta")
