@@ -36,10 +36,11 @@ registro_antiraid = defaultdict(list)
 base_datos_sanciones = defaultdict(list)
 eventos_activos = {} 
 
-# CONFIGURACIÓN EXCLUSIVA DE POSTULACIONES (STAFF Y ALLY)
+# CONFIGURACIÓN DE POSTULACIONES (CON DISEÑO Y PREGUNTAS EDITABLES)
 postulaciones_config = {
     "staff": {
         "titulo": "🛡️ POSTULACIÓN STAFF — HAKKUZE",
+        "descripcion": "Haz clic en el botón inferior para iniciar tu postulación al Cuerpo de Moderación en tus **Mensajes Privados (MD)**.",
         "color": 0x3498DB,
         "preguntas": [
             "1. Nombre / Apodo:",
@@ -61,6 +62,7 @@ postulaciones_config = {
     },
     "ally": {
         "titulo": "🤝 POSTULACIÓN CASA ALIANZA — HAKKUZE",
+        "descripcion": "Haz clic en el botón inferior para registrar tu alianza en tus **Mensajes Privados (MD)**.",
         "color": 0x2ECC71,
         "preguntas": [
             "1. Nombre / Apodo:",
@@ -352,27 +354,22 @@ async def confi_general(interaction: discord.Interaction):
 
 
 # ==========================================
-# 📋 SISTEMA DE POSTULACIONES (STAFF Y ALLY)
+# 📋 SISTEMA DE POSTULACIONES (DECORACIÓN Y PREGUNTAS)
 # ==========================================
 
-class ModalEditarFormulario(discord.ui.Modal):
+class ModalEditarDecoracionFormulario(discord.ui.Modal):
     def __init__(self, post_key, cfg):
-        super().__init__(title=f"Configurar: {cfg['titulo']}")
+        super().__init__(title=f"Decorar Panel: {post_key.upper()}")
         self.post_key = post_key
         self.cfg = cfg
 
-        self.titulo_input = discord.ui.TextInput(label="Título del Formulario", default=cfg["titulo"], max_length=100)
+        self.titulo_input = discord.ui.TextInput(label="Título del Embed", default=cfg["titulo"], max_length=100)
+        self.desc_input = discord.ui.TextInput(label="Descripción / Texto del Panel", style=discord.TextStyle.paragraph, default=cfg["descripcion"], max_length=1000)
         self.color_input = discord.ui.TextInput(label="Color Hex (ej: #3498DB)", default=f"#{cfg['color']:06x}", max_length=7)
-        self.preguntas_input = discord.ui.TextInput(
-            label="Preguntas (Una por línea)",
-            style=discord.TextStyle.paragraph,
-            default="\n".join(cfg["preguntas"]),
-            max_length=4000
-        )
 
         self.add_item(self.titulo_input)
+        self.add_item(self.desc_input)
         self.add_item(self.color_input)
-        self.add_item(self.preguntas_input)
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -380,38 +377,72 @@ class ModalEditarFormulario(discord.ui.Modal):
         except:
             return await interaction.response.send_message("❌ Color Hex inválido.", ephemeral=True)
 
+        postulaciones_config[self.post_key]["titulo"] = self.titulo_input.value.strip()
+        postulaciones_config[self.post_key]["descripcion"] = self.desc_input.value.strip()
+        postulaciones_config[self.post_key]["color"] = nuevo_color
+
+        await interaction.response.send_message(f"✨ ¡Decoración del panel **{self.post_key.upper()}** actualizada con éxito!", ephemeral=True)
+
+
+class ModalEditarPreguntasFormulario(discord.ui.Modal):
+    def __init__(self, post_key, cfg):
+        super().__init__(title=f"Preguntas: {post_key.upper()}")
+        self.post_key = post_key
+        self.cfg = cfg
+
+        self.preguntas_input = discord.ui.TextInput(
+            label="Preguntas (Una por línea)",
+            style=discord.TextStyle.paragraph,
+            default="\n".join(cfg["preguntas"]),
+            max_length=4000
+        )
+        self.add_item(self.preguntas_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
         nuevas_preguntas = [p.strip() for p in self.preguntas_input.value.split("\n") if p.strip()]
         if not nuevas_preguntas:
             return await interaction.response.send_message("❌ Debes incluir al menos una pregunta válida.", ephemeral=True)
 
-        postulaciones_config[self.post_key]["titulo"] = self.titulo_input.value.strip()
-        postulaciones_config[self.post_key]["color"] = nuevo_color
         postulaciones_config[self.post_key]["preguntas"] = nuevas_preguntas
+        await interaction.response.send_message(f"📝 ¡Preguntas de **{self.post_key.upper()}** actualizadas con éxito!", ephemeral=True)
 
-        await interaction.response.send_message(f"✅ ¡Formulario **{self.post_key.upper()}** actualizado con éxito!", ephemeral=True)
+
+class VistaSubMenuConfigPost(discord.ui.View):
+    def __init__(self, post_key, cfg):
+        super().__init__(timeout=120)
+        self.post_key = post_key
+        self.cfg = cfg
+
+    @discord.ui.button(label="🎨 Editar Decoración del Panel", style=discord.ButtonStyle.primary, emoji="✨")
+    async def btn_decorar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ModalEditarDecoracionFormulario(self.post_key, self.cfg))
+
+    @discord.ui.button(label="📝 Editar Preguntas del Cuestionario", style=discord.ButtonStyle.success, emoji="📋")
+    async def btn_preguntas(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ModalEditarPreguntasFormulario(self.post_key, self.cfg))
 
 
 class VistaBotonesConfigurarPostulaciones(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=180)
 
-    @discord.ui.button(label="🛡️ Postulación Staff", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="🛡️ Configurar Postulación Staff", style=discord.ButtonStyle.primary, row=0)
     async def btn_staff(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ModalEditarFormulario("staff", postulaciones_config["staff"]))
+        await interaction.response.send_message("Selecciona qué deseas editar de **Staff**:", view=VistaSubMenuConfigPost("staff", postulaciones_config["staff"]), ephemeral=True)
 
-    @discord.ui.button(label="🤝 Postulación Alianza", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label="🤝 Configurar Postulación Alianza", style=discord.ButtonStyle.success, row=0)
     async def btn_ally(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ModalEditarFormulario("ally", postulaciones_config["ally"]))
+        await interaction.response.send_message("Selecciona qué deseas editar de **Alianza**:", view=VistaSubMenuConfigPost("ally", postulaciones_config["ally"]), ephemeral=True)
 
 
-@client.tree.command(name="configurar-postulaciones", description="Edita los formularios de Staff o Alianza en tiempo real")
+@client.tree.command(name="configurar-postulaciones", description="Edita la decoración (títulos, descripciones, colores) o preguntas")
 async def configurar_postulaciones(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
 
     embed = discord.Embed(
         title="⚙️ Configurar Formularios de Postulación",
-        description="Haz clic en el botón correspondiente al formulario que deseas editar:",
+        description="Elige qué formulario deseas configurar (decoración visual o preguntas):",
         color=0x3498DB
     )
     await interaction.response.send_message(embed=embed, view=VistaBotonesConfigurarPostulaciones(), ephemeral=True)
@@ -498,7 +529,6 @@ class VistaComenzarPostulacion(discord.ui.View):
                 description=f"👤 **Candidato:** {self.miembro_postulado.mention} (`{self.miembro_postulado.id}`)\n\n{txt}", 
                 color=self.config_form['color']
             )
-            # Agregar el avatar del candidato como foto pequeña (thumbnail)
             if self.miembro_postulado.display_avatar:
                 embed_final.set_thumbnail(url=self.miembro_postulado.display_avatar.url)
             
@@ -536,7 +566,7 @@ async def postulacion(interaction: discord.Interaction, miembro: discord.Member)
         
         embed_panel = discord.Embed(
             title=cfg['titulo'],
-            description=f"Candidato: {miembro.mention}\nHaz clic en el botón inferior para responder las preguntas en tus **Mensajes Privados (MD)**.",
+            description=cfg['descripcion'],
             color=cfg['color']
         )
         if miembro.display_avatar:
@@ -618,7 +648,7 @@ async def warn(interaction: discord.Interaction, miembro: discord.Member, razon:
         await miembro.send(embed=discord.Embed(title="⚠️ Advertencia", description=f"Has recibido una advertencia en **{interaction.guild.name}**.\n**Razón:** {razon}", color=discord.Color.gold()))
     except: pass
     
-    embed_log = discord.Embed(title="⚠️️ Sanción: Warn", description=f"**Usuario:** {miembro.mention}\n**Moderador:** {interaction.user.mention}\n**Razón:** {razon}", color=discord.Color.gold())
+    embed_log = discord.Embed(title="⚠️ Sanción: Warn", description=f"**Usuario:** {miembro.mention}\n**Moderador:** {interaction.user.mention}\n**Razón:** {razon}", color=discord.Color.gold())
     await registrar_log_sancion(interaction.guild, embed_log)
     await interaction.response.send_message(f"⚠️ {miembro.mention} ha sido advertido.")
 
@@ -789,7 +819,7 @@ async def iniciar_evento(interaction: discord.Interaction):
 @client.tree.command(name="lista-eventos", description="Muestra todos los eventos activos")
 async def lista_eventos(interaction: discord.Interaction):
     if not eventos_activos:
-        return await interaction.response.send_message("🛡️ No hay eventos activos.", ephemeral=True)
+        return await interaction.response.send_message("🛡️️ No hay eventos activos.", ephemeral=True)
 
     embed = discord.Embed(title="📊 Lista de Eventos Activos", color=0x9B59B6)
     guild = interaction.guild
