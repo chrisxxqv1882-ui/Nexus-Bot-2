@@ -9,28 +9,34 @@ from discord import app_commands
 # Configuración global avanzada del bot
 config_global = {
     "prefijo": "a¡",
-    "rol_comandos_id": None,  
     "rol_organizar_eventos_id": None, 
     "rol_aprobar_sugerencias_id": None, 
-    "canal_logs_id": None,     
     "canal_sanciones_id": None, 
     "canal_sugerencias_id": None, 
+    "canal_postulaciones_id": None, # Canal global único para recibir todas las postulaciones
     "contador_postulaciones": 0, 
+    # Anti-Spam
     "antispam_activo": True,
     "antispam_limite_mensajes": 5,
     "antispam_ventana_segundos": 5,
     "antispam_timeout_segundos": 60,
+    # Anti-Bot y Anti-Raid Avanzado
     "antibots_activo": True,
+    "antiraid_activo": True,
+    "antiraid_limite_ingresos": 5, # Máximo de miembros unidos
+    "antiraid_ventana_segundos": 10, # en esta ventana de tiempo
+    # Juegos
     "embed_juegos_titulo": "🎮 Zona de Juegos e Interacción",
     "embed_juegos_desc": "¡Diviértete con los minijuegos multijugador y nuestra trivia masiva estilo Nekotrivia!",
     "embed_juegos_color": 0xF1C40F
 }
 
 registro_antispam = defaultdict(list)
+registro_antiraid = defaultdict(list)
 base_datos_sanciones = defaultdict(list)
 eventos_activos = {} 
 
-# CONFIGURACIÓN DE POSTULACIONES (CON PREGUNTAS EDITABLES)
+# CONFIGURACIÓN DE POSTULACIONES (TOTALMENTE EDITABLES)
 postulaciones_config = {
     "staff": {
         "titulo": "📝 Postulación: Cuerpo de Moderación",
@@ -93,19 +99,48 @@ async def registrar_log_sancion(guild: discord.Guild, embed: discord.Embed):
             except: pass
 
 
+# ==========================================
+# 🛡️ SISTEMA AVANZADO ANTI-BOT Y ANTI-RAID
+# ==========================================
+
 @client.event
 async def on_member_join(member):
+    guild = member.guild
+    ahora = time.time()
+
+    # 1. Sistema Anti-Raid Eficiente
+    if config_global["antiraid_activo"]:
+        registro_antiraid[guild.id] = [t for t in registro_antiraid[guild.id] if ahora - t < config_global["antiraid_ventana_segundos"]]
+        registro_antiraid[guild.id].append(ahora)
+
+        if len(registro_antiraid[guild.id]) > config_global["antiraid_limite_ingresos"]:
+            try:
+                # Bloquear invitaciones temporalmente o tomar acción defensiva
+                embed_raid = discord.Embed(
+                    title="🚨 ¡ALERTA ANTI-RAID ACTIVADA!",
+                    description=f"Se detectó un ingreso masivo de cuentas en **{guild.name}**. Se recomienda activar el modo lento o verificar la seguridad.",
+                    color=discord.Color.red()
+                )
+                await registrar_log_sancion(guild, embed_raid)
+            except: pass
+
+    # 2. Sistema Anti-Bot Seguro
     if member.bot and config_global["antibots_activo"]:
         try:
-            async for entry in member.guild.audit_logs(limit=5, action=discord.AuditLogAction.bot_add):
+            async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.bot_add):
                 if entry.target.id == member.id:
                     invitador = entry.user
-                    await member.guild.ban(member, reason="Anti-Bots: Bot no autorizado")
-                    if invitador and not invitador.guild_permissions.administrator:
-                        await member.guild.ban(invitador, reason="Anti-Bots: Invitó un bot no autorizado")
+                    await guild.ban(member, reason="Anti-Bots: Bot no autorizado")
                     
-                    embed_log = discord.Embed(title="🤖 Anti-Bots Activado", description=f"Bot no autorizado {member.mention} baneado.\nInvitador: {invitador.mention if invitador else 'Desconocido'}", color=discord.Color.red())
-                    await registrar_log_sancion(member.guild, embed_log)
+                    if invitador and not invitador.guild_permissions.administrator:
+                        await guild.ban(invitador, reason="Anti-Bots: Invitó un bot no autorizado sin permisos")
+                    
+                    embed_log = discord.Embed(
+                        title="🤖 Anti-Bots Activado", 
+                        description=f"Bot no autorizado {member.mention} baneado.\nInvitador: {invitador.mention if invitador else 'Desconocido'}", 
+                        color=discord.Color.red()
+                    )
+                    await registrar_log_sancion(guild, embed_log)
                     break
         except Exception as e:
             print(f"Error en anti-bots: {e}")
@@ -226,7 +261,7 @@ async def on_message(message):
 
 
 # ==========================================
-# ⚙️️ /CONFI-GENERAL EN EMBED INTERACTIVO
+# ⚙️ /CONFI-GENERAL EN EMBED INTERACTIVO
 # ==========================================
 
 class VistaBotonConfigGeneral(discord.ui.View):
@@ -260,7 +295,7 @@ class VistaBotonConfigGeneral(discord.ui.View):
                 await i.response.send_message(f"✅ Rol de sugerencias actualizado.", ephemeral=True)
         await interaction.response.send_modal(M())
 
-    @discord.ui.button(label="🛡️️ Canal Sanciones", style=discord.ButtonStyle.primary, row=1)
+    @discord.ui.button(label="🛡️ Canal Sanciones", style=discord.ButtonStyle.primary, row=1)
     async def set_canalsancion(self, interaction: discord.Interaction, button: discord.ui.Button):
         class M(discord.ui.Modal, title="Configurar Canal Sanciones"):
             v = discord.ui.TextInput(label="ID del Canal", default=str(config_global["canal_sanciones_id"] or ""), max_length=20)
@@ -278,13 +313,13 @@ class VistaBotonConfigGeneral(discord.ui.View):
                 await i.response.send_message(f"✅ Canal de sugerencias actualizado.", ephemeral=True)
         await interaction.response.send_modal(M())
 
-    @discord.ui.button(label="📋 Canal Postulaciones (Logs)", style=discord.ButtonStyle.success, row=1)
+    @discord.ui.button(label="📋 Canal Global Postulaciones", style=discord.ButtonStyle.success, row=1)
     async def set_canallogs(self, interaction: discord.Interaction, button: discord.ui.Button):
-        class M(discord.ui.Modal, title="Configurar Canal Logs Postulaciones"):
-            v = discord.ui.TextInput(label="ID del Canal", default=str(config_global["canal_logs_id"] or ""), max_length=20)
+        class M(discord.ui.Modal, title="Configurar Canal Global Postulaciones"):
+            v = discord.ui.TextInput(label="ID del Canal", default=str(config_global["canal_postulaciones_id"] or ""), max_length=20)
             async def on_submit(self, i: discord.Interaction):
-                config_global["canal_logs_id"] = int(self.v.value.strip()) if self.v.value.strip() else None
-                await i.response.send_message(f"✅ Canal de postulaciones actualizado.", ephemeral=True)
+                config_global["canal_postulaciones_id"] = int(self.v.value.strip()) if self.v.value.strip() else None
+                await i.response.send_message(f"✅ Canal global de postulaciones actualizado.", ephemeral=True)
         await interaction.response.send_modal(M())
 
 
@@ -303,36 +338,77 @@ async def confi_general(interaction: discord.Interaction):
     embed.add_field(name="💡 Rol Aprobar Sugerencias", value=f"<@&{config_global['rol_aprobar_sugerencias_id']}>" if config_global['rol_aprobar_sugerencias_id'] else "No configurado", inline=True)
     embed.add_field(name="🛡️ Canal Sanciones", value=f"<#{config_global['canal_sanciones_id']}>" if config_global['canal_sanciones_id'] else "No configurado", inline=True)
     embed.add_field(name="📢 Canal Sugerencias", value=f"<#{config_global['canal_sugerencias_id']}>" if config_global['canal_sugerencias_id'] else "No configurado", inline=True)
-    embed.add_field(name="📋 Canal Postulaciones", value=f"<#{config_global['canal_logs_id']}>" if config_global['canal_logs_id'] else "No configurado", inline=True)
+    embed.add_field(name="📋 Canal Global Postulaciones", value=f"<#{config_global['canal_postulaciones_id']}>" if config_global['canal_postulaciones_id'] else "No configurado", inline=True)
 
     await interaction.response.send_message(embed=embed, view=VistaBotonConfigGeneral(), ephemeral=True)
 
 
 # ==========================================
-# 📋 SISTEMA DE POSTULACIONES CON PREGUNTAS EDITABLES Y MD
+# 📋 SISTEMA DE POSTULACIONES Y /CONFIGURAR-POSTULACIONES
 # ==========================================
 
-class ModalEditarPreguntasPostulacion(discord.ui.Modal):
+class ModalEditarFormulario(discord.ui.Modal):
     def __init__(self, post_key, cfg):
-        super().__init__(title=f"Editar Preguntas: {cfg['titulo']}")
+        super().__init__(title=f"Configurar: {cfg['titulo']}")
         self.post_key = post_key
         self.cfg = cfg
 
+        self.titulo_input = discord.ui.TextInput(label="Título del Formulario", default=cfg["titulo"], max_length=100)
+        self.color_input = discord.ui.TextInput(label="Color Hex (ej: #3498DB)", default=f"#{cfg['color']:06x}", max_length=7)
         self.preguntas_input = discord.ui.TextInput(
             label="Preguntas (Una por línea)",
             style=discord.TextStyle.paragraph,
             default="\n".join(cfg["preguntas"]),
             max_length=2000
         )
+
+        self.add_item(self.titulo_input)
+        self.add_item(self.color_input)
         self.add_item(self.preguntas_input)
 
     async def on_submit(self, interaction: discord.Interaction):
+        try:
+            nuevo_color = int(self.color_input.value.strip().replace("#", ""), 16)
+        except:
+            return await interaction.response.send_message("❌ Color Hex inválido.", ephemeral=True)
+
         nuevas_preguntas = [p.strip() for p in self.preguntas_input.value.split("\n") if p.strip()]
-        if nuevas_preguntas:
-            postulaciones_config[self.post_key]["preguntas"] = nuevas_preguntas
-            await interaction.response.send_message(f"✅ ¡Preguntas de **{self.cfg['titulo']}** actualizadas correctamente!", ephemeral=True)
-        else:
-            await interaction.response.send_message("❌ Debes incluir al menos una pregunta válida.", ephemeral=True)
+        if not nuevas_preguntas:
+            return await interaction.response.send_message("❌ Debes incluir al menos una pregunta válida.", ephemeral=True)
+
+        postulaciones_config[self.post_key]["titulo"] = self.titulo_input.value.strip()
+        postulaciones_config[self.post_key]["color"] = nuevo_color
+        postulaciones_config[self.post_key]["preguntas"] = nuevas_preguntas
+
+        await interaction.response.send_message(f"✅ ¡Formulario **{self.post_key}** actualizado con éxito!", ephemeral=True)
+
+
+@client.tree.command(name="configurar-postulaciones", description="Edita títulos, colores y preguntas de los formularios de postulación")
+async def configurar_postulaciones(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
+
+    v = discord.ui.View(timeout=60)
+    s = discord.ui.Select(
+        placeholder="Selecciona el formulario a editar...",
+        options=[
+            discord.SelectOption(label="Staff (Moderación)", value="staff", emoji="📝"),
+            discord.SelectOption(label="Casa Alianza", value="ally", emoji="🤝"),
+            discord.SelectOption(label="Cuerpo de Redes", value="redes", emoji="🎨"),
+            discord.SelectOption(label="Cuerpo de Programación", value="nexus", emoji="💻")
+        ]
+    )
+
+    async def cb(i):
+        tipo_sel = s.values[0]
+        cfg = postulaciones_config.get(tipo_sel, {})
+        await i.response.send_modal(ModalEditarFormulario(tipo_sel, cfg))
+
+    s.callback = cb
+    v.add_item(s)
+
+    embed = discord.Embed(title="⚙️ Configurar Formularios", description="Selecciona en el menú desplegable qué formulario deseas editar en tiempo real:", color=0x3498DB)
+    await interaction.response.send_message(embed=embed, view=v, ephemeral=True)
 
 
 class VistaComenzarPostulacion(discord.ui.View):
@@ -360,7 +436,9 @@ class VistaComenzarPostulacion(discord.ui.View):
                 color=self.config_form['color']
             )
             
-            destino = interaction.guild.get_channel(config_global["canal_logs_id"]) if config_global["canal_logs_id"] else interaction.channel
+            # Enviar al canal global configurado o al canal actual como respaldo
+            canal_id = config_global["canal_postulaciones_id"]
+            destino = interaction.guild.get_channel(canal_id) if canal_id else interaction.channel
             if destino: 
                 await destino.send(embed=embed_final)
             
@@ -371,14 +449,14 @@ class VistaComenzarPostulacion(discord.ui.View):
             except: pass
 
 
-@client.tree.command(name="postulacion", description="Envía un panel de postulación y permite editar sus preguntas")
+@client.tree.command(name="postulacion", description="Envía el panel de postulación para un usuario")
 async def postulacion(interaction: discord.Interaction, miembro: discord.Member):
     if not interaction.user.guild_permissions.administrator and not interaction.user.guild_permissions.manage_guild:
         return await interaction.response.send_message("❌ No tienes permisos para gestionar postulaciones.", ephemeral=True)
 
     v = discord.ui.View(timeout=60)
     s = discord.ui.Select(
-        placeholder="Selecciona el formulario de postulación...", 
+        placeholder="Selecciona el formulario...", 
         options=[
             discord.SelectOption(label="Staff (Moderación)", value="staff", emoji="📝"),
             discord.SelectOption(label="Casa Alianza", value="ally", emoji="🤝"),
@@ -390,34 +468,15 @@ async def postulacion(interaction: discord.Interaction, miembro: discord.Member)
     async def cb(i):
         tipo_sel = s.values[0]
         cfg = postulaciones_config.get(tipo_sel, {})
+        config_global["contador_postulaciones"] += 1
+        num_id = config_global["contador_postulaciones"]
         
-        class VistaMenuPostulacionOpciones(discord.ui.View):
-            def __init__(self):
-                super().__init__(timeout=60)
-
-            @discord.ui.button(label="🚀 Enviar Formulario al Usuario", style=discord.ButtonStyle.success)
-            async def btn_enviar(self, i2: discord.Interaction, btn: discord.ui.Button):
-                config_global["contador_postulaciones"] += 1
-                num_id = config_global["contador_postulaciones"]
-                embed_panel = discord.Embed(
-                    title=cfg['titulo'],
-                    description=f"Candidato: {miembro.mention}\nHaz clic en el botón inferior para responder las preguntas en tus **Mensajes Privados (MD)**.",
-                    color=cfg['color']
-                )
-                await i2.channel.send(embed=embed_panel, view=VistaComenzarPostulacion(tipo_sel, num_id, cfg["preguntas"], miembro, cfg))
-                await i2.response.edit_message(content=f"✅ Formulario enviado a {miembro.mention}.", embed=None, view=None)
-
-            @discord.ui.button(label="✏️ Editar Preguntas del Formulario", style=discord.ButtonStyle.primary)
-            async def btn_editar(self, i2: discord.Interaction, btn: discord.ui.Button):
-                await i2.response.send_modal(ModalEditarPreguntasPostulacion(tipo_sel, cfg))
-
-        preguntas_actuales = "\n".join([f"• {p}" for p in cfg["preguntas"]])
-        embed_config = discord.Embed(
-            title=f"⚙️ Gestión: {cfg['titulo']}",
-            description=f"**Preguntas configuradas actualmente:**\n{preguntas_actuales}\n\nElige una opción:",
+        embed_panel = discord.Embed(
+            title=cfg['titulo'],
+            description=f"Candidato: {miembro.mention}\nHaz clic en el botón inferior para responder las preguntas en tus **Mensajes Privados (MD)**.",
             color=cfg['color']
         )
-        await i.response.edit_message(content=None, embed=embed_config, view=VistaMenuPostulacionOpciones())
+        await i.response.edit_message(content=f"✅ Formulario listo para {miembro.mention}.", embed=embed_panel, view=VistaComenzarPostulacion(tipo_sel, num_id, cfg["preguntas"], miembro, cfg))
 
     s.callback = cb
     v.add_item(s)
@@ -425,7 +484,7 @@ async def postulacion(interaction: discord.Interaction, miembro: discord.Member)
 
 
 # ==========================================
-# 📅 SISTEMA DE EVENTOS Y /INICIAR-EVENTO
+# 📅 SISTEMA DE EVENTOS (CON OPCIONES OPCIONALES)
 # ==========================================
 
 class VistaEventoParticipar(discord.ui.View):
@@ -455,14 +514,14 @@ class VistaEventoParticipar(discord.ui.View):
         embed_viejo = interaction.message.embeds[0]
         embed_nuevo = discord.Embed(
             title=embed_viejo.title,
-            description=embed_viejo.description.split("\n\n👑")[0],
+            description=embed_viejo.description,
             color=embed_viejo.color
         )
-        embed_nuevo.add_field(name="👑 Organizadores", value=datos["organizadores"], inline=False)
-        embed_nuevo.add_field(name="⏰ Inicio", value=datos["tiempo"], inline=True)
-        embed_nuevo.add_field(name="🏆 Ganadores", value=datos["ganadores"], inline=True)
-        embed_nuevo.add_field(name=f"👥 Participantes ({len(participantes)})", value=lista_nombres_str, inline=False)
+        for field in embed_viejo.fields:
+            if "Participantes" not in field.name:
+                embed_nuevo.add_field(name=field.name, value=field.value, inline=field.inline)
         
+        embed_nuevo.add_field(name=f"👥 Participantes ({len(participantes)})", value=lista_nombres_str, inline=False)
         if embed_viejo.image.url:
             embed_nuevo.set_image(url=embed_viejo.image.url)
 
@@ -470,17 +529,26 @@ class VistaEventoParticipar(discord.ui.View):
         await interaction.response.send_message(estado_msj, ephemeral=True)
 
 
-@client.tree.command(name="organizar-evento", description="Organiza un evento con múltiples organizadores y tiempo real")
+@client.tree.command(name="organizar-evento", description="Organiza un evento interactivo con parámetros opcionales")
 @app_commands.describe(
     nombre="Nombre del evento", 
     canal="Canal donde se publicará", 
-    texto="Descripción del evento", 
-    organizadores="Nombres de los organizadores (ej: @Mod1, @Mod2)",
-    tiempo="¿Cuándo empieza? (ej: Mañana a las 5 PM)",
-    ganadores="Número de ganadores (ej: 3 ganadores)",
-    mencion="Rol a pingo avisar (ej: @everyone)"
+    texto="Descripción del evento (Opcional)", 
+    organizadores="Nombres de los organizadores (Opcional)",
+    tiempo="¿Cuándo empieza? (Opcional)",
+    ganadores="Número de ganadores (Opcional)",
+    mencion="Rol o mención a avisar (Opcional)"
 )
-async def organizar_evento(interaction: discord.Interaction, nombre: str, canal: discord.TextChannel, texto: str, organizadores: str, tiempo: str, ganadores: str, mencion: str = ""):
+async def organizar_evento(
+    interaction: discord.Interaction, 
+    nombre: str, 
+    canal: discord.TextChannel, 
+    texto: str = "¡Participa en nuestro evento!", 
+    organizadores: str = "Staff", 
+    tiempo: str = "Pronto", 
+    ganadores: str = "Por definir", 
+    mencion: str = ""
+):
     rol_req_id = config_global["rol_organizar_eventos_id"]
     tiene_permiso = interaction.user.guild_permissions.manage_events or interaction.user.guild_permissions.administrator
     if not tiene_permiso and rol_req_id:
@@ -594,7 +662,7 @@ async def lista_eventos(interaction: discord.Interaction):
 @client.tree.command(name="help", description="Centro de ayuda")
 async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(title="✨ Centro de Ayuda", description=f"Prefijo: `{config_global['prefijo']}`", color=0x5865F2)
-    embed.add_field(name="⚙ Módulos Activos", value="• `/confi-general` • `/postulacion`\n• `/organizar-evento` • `/iniciar-evento` • `/lista-eventos`\n• `/juegos` • `/dado` • `/trivia`", inline=False)
+    embed.add_field(name="⚙ Módulos Activos", value="• `/confi-general` • `/configurar-postulaciones` • `/postulacion`\n• `/organizar-evento` • `/iniciar-evento` • `/lista-eventos`\n• `/juegos` • `/dado` • `/trivia`", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
