@@ -341,7 +341,7 @@ async def confi_general(interaction: discord.Interaction):
 
 
 # ==========================================
-# 📋 SISTEMA DE POSTULACIONES Y /CONFIGURAR-POSTULACIONES (CON BOTONES)
+# 📋 SISTEMA DE POSTULACIONES SEGURO Y CON BOTONES APROBAR/RECHAZAR
 # ==========================================
 
 class ModalEditarFormulario(discord.ui.Modal):
@@ -384,19 +384,19 @@ class VistaBotonesConfigurarPostulaciones(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=180)
 
-    @discord.ui.button(label="📝 Staff (Moderación)", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="📝 Staff", style=discord.ButtonStyle.primary, row=0)
     async def btn_staff(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ModalEditarFormulario("staff", postulaciones_config["staff"]))
 
-    @discord.ui.button(label="🤝 Casa Alianza", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label="🤝 Alianza", style=discord.ButtonStyle.success, row=0)
     async def btn_ally(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ModalEditarFormulario("ally", postulaciones_config["ally"]))
 
-    @discord.ui.button(label="🎨 Cuerpo de Redes", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="🎨 Redes", style=discord.ButtonStyle.secondary, row=1)
     async def btn_redes(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ModalEditarFormulario("redes", postulaciones_config["redes"]))
 
-    @discord.ui.button(label="💻 Cuerpo de Programación", style=discord.ButtonStyle.danger, row=1)
+    @discord.ui.button(label="💻 Programación", style=discord.ButtonStyle.danger, row=1)
     async def btn_nexus(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ModalEditarFormulario("nexus", postulaciones_config["nexus"]))
 
@@ -414,6 +414,61 @@ async def configurar_postulaciones(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=VistaBotonesConfigurarPostulaciones(), ephemeral=True)
 
 
+class VistaVeredictoPostulacion(discord.ui.View):
+    def __init__(self, candidato_id: int, titulo_form: str):
+        super().__init__(timeout=None)
+        self.candidato_id = candidato_id
+        self.titulo_form = titulo_form
+
+    @discord.ui.button(label="✅ Aprobar", style=discord.ButtonStyle.success, custom_id="btn_aprobar_post")
+    async def aprobar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator and not interaction.user.guild_permissions.manage_guild:
+            return await interaction.response.send_message("❌ No tienes permisos para aprobar postulaciones.", ephemeral=True)
+
+        for child in self.children: child.disabled = True
+        embed = interaction.message.embeds[0]
+        embed.color = discord.Color.green()
+        embed.add_field(name="📌 Resultado", value=f"✅ **Aprobada** por {interaction.user.mention}", inline=False)
+        await interaction.message.edit(embed=embed, view=self)
+
+        try:
+            candidato = interaction.guild.get_member(self.candidato_id)
+            if candidato:
+                embed_md = discord.Embed(
+                    title="🎉 ¡Postulación Aprobada!",
+                    description=f"¡Felicidades! Tu postulación para **{self.titulo_form}** en **{interaction.guild.name}** ha sido **APROBADA**.",
+                    color=discord.Color.green()
+                )
+                await candidato.send(embed=embed_md)
+        except: pass
+
+        await interaction.response.send_message("✅ Postulación aprobada correctamente.", ephemeral=True)
+
+    @discord.ui.button(label="❌ Rechazar", style=discord.ButtonStyle.danger, custom_id="btn_rechazar_post")
+    async def rechazar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator and not interaction.user.guild_permissions.manage_guild:
+            return await interaction.response.send_message("❌ No tienes permisos para rechazar postulaciones.", ephemeral=True)
+
+        for child in self.children: child.disabled = True
+        embed = interaction.message.embeds[0]
+        embed.color = discord.Color.red()
+        embed.add_field(name="📌 Resultado", value=f"❌ **Rechazada** por {interaction.user.mention}", inline=False)
+        await interaction.message.edit(embed=embed, view=self)
+
+        try:
+            candidato = interaction.guild.get_member(self.candidato_id)
+            if candidato:
+                embed_md = discord.Embed(
+                    title="❌ Postulación No Aprobada",
+                    description=f"Lamentamos informarte que tu postulación para **{self.titulo_form}** en **{interaction.guild.name}** no ha sido aceptada en esta ocasión.",
+                    color=discord.Color.red()
+                )
+                await candidato.send(embed=embed_md)
+        except: pass
+
+        await interaction.response.send_message("❌ Postulación rechazada.", ephemeral=True)
+
+
 class VistaComenzarPostulacion(discord.ui.View):
     def __init__(self, tipo, num_id, preguntas, miembro_postulado, config_form):
         super().__init__(timeout=None)
@@ -421,8 +476,9 @@ class VistaComenzarPostulacion(discord.ui.View):
 
     @discord.ui.button(label="🚀 Comenzar Postulación", style=discord.ButtonStyle.success)
     async def comenzar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # CANDADO SEGURO: Solo el candidato mencionado puede iniciar el form
         if interaction.user.id != self.miembro_postulado.id:
-            return await interaction.response.send_message("❌ Este formulario no es para ti.", ephemeral=True)
+            return await interaction.response.send_message("🔒 **Candado Seguro:** Este formulario es exclusivo para el usuario mencionado y no puedes iniciarlo.", ephemeral=True)
         
         await interaction.response.send_message("📬 ¡Cuestionario abierto en tus **Mensajes Privados (MD)**!", ephemeral=True)
         try:
@@ -435,14 +491,14 @@ class VistaComenzarPostulacion(discord.ui.View):
             txt = "".join([f"**{p}**\n↳ {r}\n\n" for p, r in respuestas])
             embed_final = discord.Embed(
                 title=f"{self.config_form['titulo']} (#{self.num_id})", 
-                description=f"👤 **Candidato:** {self.miembro_postulado.mention}\n\n{txt}", 
+                description=f"👤 **Candidato:** {self.miembro_postulado.mention} (`{self.miembro_postulado.id}`)\n\n{txt}", 
                 color=self.config_form['color']
             )
             
             canal_id = config_global["canal_postulaciones_id"]
             destino = interaction.guild.get_channel(canal_id) if canal_id else interaction.channel
             if destino: 
-                await destino.send(embed=embed_final)
+                await destino.send(embed=embed_final, view=VistaVeredictoPostulacion(self.miembro_postulado.id, self.config_form['titulo']))
             
             await self.miembro_postulado.send("🎉 ¡Postulación completada y enviada al staff con éxito!")
         except Exception as e:
