@@ -9,7 +9,7 @@ config_global = {
     "prefijo": "a¡",
     "rol_comandos_id": None,  
     "rol_atencion_id": None,   
-    "canal_logs_id": None,     
+    "canal_logs_id": None,     # Canal donde se envían las respuestas de los formularios
     "contador_postulaciones": 0, 
     "embed_juegos_titulo": "🎮 Zona de Juegos e Interacción",
     "embed_juegos_desc": "¡Diviértete con los minijuegos multijugador y nuestra trivia masiva estilo Nekotrivia!",
@@ -40,81 +40,81 @@ postulaciones_config = {
     }
 }
 
-# 🧠 BANCO DE TRIVIA LIMPIO Y SIN NÚMEROS ESTILO NEKOTRIVIA
+# 🧠 BANCO DE TRIVIA CON GIFS FUNCIONALES Y ESTABLES
 BANCO_TRIVIA = [
     {
         "p": "¿Cómo se llama el protagonista de Dragon Ball que come sin parar?",
         "correcta": "Goku",
         "opciones": ["Vegeta", "Goku", "Piccolo", "Krillin"],
         "cat": "Anime",
-        "img": "https://media.giphy.com/media/cb9aF9tDyiRkY/giphy.gif"
+        "img": "https://media4.giphy.com/media/cb9aF9tDyiRkY/giphy.gif"
     },
     {
         "p": "¿Cuál es el nombre de la libreta mortal en Death Note?",
         "correcta": "Death Note",
         "opciones": ["Life Note", "Death Note", "Dark Book", "Shinigami Note"],
         "cat": "Anime",
-        "img": "https://media.giphy.com/media/HjfiEczPb2y6s/giphy.gif"
+        "img": "https://media3.giphy.com/media/HjfiEczPb2y6s/giphy.gif"
     },
     {
         "p": "¿En Naruto, cuál es el gran sueño de Naruto Uzumaki?",
         "correcta": "Hokage",
         "opciones": ["Kazekage", "Hokage", "Hokage Oscuro", "Sannin"],
         "cat": "Anime",
-        "img": "https://media.giphy.com/media/Kzb1zItSqUf0g/giphy.gif"
+        "img": "https://media1.giphy.com/media/Kzb1zItSqUf0g/giphy.gif"
     },
     {
         "p": "¿Cómo se llama el titán principal de Eren Jaeger en Shingeki no Kyojin?",
         "correcta": "Titán de Ataque",
         "opciones": ["Titán Colosal", "Titán Blindado", "Titán de Ataque", "Titán Bestia"],
         "cat": "Anime",
-        "img": "https://media.giphy.com/media/v0ok8uhZvw3yE/giphy.gif"
+        "img": "https://media2.giphy.com/media/v0ok8uhZvw3yE/giphy.gif"
     },
     {
         "p": "¿Qué fruta del diablo consume Monkey D. Luffy en One Piece?",
         "correcta": "Gomu Gomu",
         "opciones": ["Mera Mera", "Gomu Gomu", "Ope Ope", "Hito Hito"],
         "cat": "Anime",
-        "img": "https://media.giphy.com/media/9BuHO7tE98McE/giphy.gif"
+        "img": "https://media3.giphy.com/media/9BuHO7tE98McE/giphy.gif"
     },
     {
         "p": "¿Cómo se llama el cazador de demonios con cabello burdeos en Kimetsu no Yaiba?",
         "correcta": "Tanjiro",
         "opciones": ["Inosuke", "Zenitsu", "Tanjiro", "Muzan"],
         "cat": "Anime",
-        "img": "https://media.giphy.com/media/tEXUOC8zScfbhz0VDg/giphy.gif"
+        "img": "https://media1.giphy.com/media/tEXUOC8zScfbhz0VDg/giphy.gif"
     },
     {
         "p": "¿Qué civilización construyó la majestuosa ciudad de Machu Picchu?",
         "correcta": "Inca",
         "opciones": ["Maya", "Azteca", "Inca", "Romana"],
         "cat": "Historia",
-        "img": "https://media.giphy.com/media/3o7TKSjRrfIPjeiDiM/giphy.gif"
+        "img": "https://media3.giphy.com/media/3o7TKSjRrfIPjeiDiM/giphy.gif"
     },
     {
         "p": "¿En qué año dio inicio oficialmente la Primera Guerra Mundial?",
         "correcta": "1914",
         "opciones": ["1914", "1939", "1812", "1905"],
         "cat": "Historia",
-        "img": "https://media.giphy.com/media/l0HlRnAWXxn0MhOBK/giphy.gif"
+        "img": "https://media2.giphy.com/media/l0HlRnAWXxn0MhOBK/giphy.gif"
     },
     {
         "p": "¿Quién fue el primer presidente en la historia de los Estados Unidos?",
         "correcta": "George Washington",
         "opciones": ["Abraham Lincoln", "George Washington", "Thomas Jefferson", "John Adams"],
         "cat": "Historia",
-        "img": "https://media.giphy.com/media/l4FGpPki5v2Bcd6Ss/giphy.gif"
+        "img": "https://media3.giphy.com/media/l4FGpPki5v2Bcd6Ss/giphy.gif"
     }
 ]
 
-for i in range(290):
+for i in range(200):
     if i % 2 == 0:
         BANCO_TRIVIA.append({
             "p": "Cultura Otaku: ¿Este personaje o serie es sumamente popular globalmente?",
             "correcta": "Sí",
             "opciones": ["Sí", "No", "Tal vez", "Falso"],
             "cat": "Anime",
-            "img": "https://media.giphy.com/media/cb9aF9tDyiRkY/giphy.gif"
+            "img": "https://media4.giphy.com/media/cb9aF9tDyiRkY/giphy.gif"
         })
     else:
         BANCO_TRIVIA.append({
@@ -122,7 +122,7 @@ for i in range(290):
             "correcta": "Sí",
             "opciones": ["Sí", "No", "Fue menor", "Ficción"],
             "cat": "Historia",
-            "img": "https://media.giphy.com/media/3o7TKSjRrfIPjeiDiM/giphy.gif"
+            "img": "https://media3.giphy.com/media/3o7TKSjRrfIPjeiDiM/giphy.gif"
         })
 
 
@@ -148,14 +148,12 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # 1. Comprobación de Prefijo para comandos de texto
     if message.content.startswith(config_global["prefijo"]):
         contenido = message.content[len(config_global["prefijo"]):].strip().lower()
         if contenido == "ayuda" or contenido == "config":
-            await message.channel.send(f"⚙️ El prefijo actual del bot es `{config_global['prefijo']}`. Usa los comandos barra `/` para gestionar el servidor.")
+            await message.channel.send(f"⚙️ El prefijo actual del bot es `{config_global['prefijo']}`. Usa `/configuracion` para gestionar el servidor.")
         return
 
-    # 2. Responder EXCLUSIVAMENTE si el bot es mencionado directamente como primera mención o al inicio
     if client.user in message.mentions and message.reference is None:
         embed = discord.Embed(
             title="✨ ¡Hola! Soy Nexus Bot — Tu Centro de Control",
@@ -165,8 +163,8 @@ async def on_message(message):
         if client.user.avatar:
             embed.set_thumbnail(url=client.user.avatar.url)
 
-        embed.add_field(name="🛠️ Configuración", value=f"• `/configuracion` o `{config_global['prefijo']}config` ➜ Roles, canales y formularios ilimitados.", inline=False)
-        embed.add_field(name="📋 Postulaciones Interactivas", value="• `/postulacion_staff` | `/postulacion_casa-ally` | `/postulaicon_redes` | `/postulacion_nexus`", inline=False)
+        embed.add_field(name="🛠️ Configuración", value=f"• `/configuracion` ➜ Menú desplegable para roles, canal de respuestas y formularios.", inline=False)
+        embed.add_field(name="📋 Postulaciones", value="• `/postulacion` ➜ Menú único para iniciar cualquier postulación.", inline=False)
         embed.add_field(name="🎯 Zona de Juegos", value="• `/juegos` • `/trivia` • `/ppt` • `/dado`", inline=False)
         embed.set_footer(text=f"Solicitado por {message.author.display_name}", icon_url=message.author.display_avatar.url)
         await message.channel.send(embed=embed)
@@ -187,7 +185,7 @@ def verificar_permisos_atencion(interaction: discord.Interaction) -> bool:
     return False
 
 
-# --- MODALES DE CONFIGURACIÓN DINÁMICA DE PREGUNTAS (SIN LÍMITE DE CANTIDAD) ---
+# --- MODALES DE CONFIGURACIÓN ---
 
 class ModalConfigFormulario(discord.ui.Modal):
     def __init__(self, tipo: str, nombre_bonito: str):
@@ -199,7 +197,6 @@ class ModalConfigFormulario(discord.ui.Modal):
 
         self.input_titulo = discord.ui.TextInput(label="Título del Embed", default=cfg_actual.get("titulo", ""), required=True, max_length=100)
         self.input_color = discord.ui.TextInput(label="Color Hex", default=color_actual_hex, required=True, max_length=7)
-        # Usamos un campo de texto grande (paragraph) que permite agregar tantas preguntas como quieras, una por línea
         self.input_preguntas = discord.ui.TextInput(label="Preguntas (Una por línea, sin límite)", style=discord.TextStyle.paragraph, default=preguntas_actuales, required=True, max_length=4000)
 
         self.add_item(self.input_titulo)
@@ -210,7 +207,6 @@ class ModalConfigFormulario(discord.ui.Modal):
         try: nuevo_color = int(self.input_color.value.strip().replace("#", ""), 16)
         except: return await interaction.response.send_message("❌ Color Hex inválido.", ephemeral=True)
 
-        # Extraer todas las preguntas separadas por saltos de línea (admite la cantidad que agregues)
         nuevas_preguntas = [p.strip() for p in self.input_preguntas.value.split('\n') if p.strip()]
         if not nuevas_preguntas:
             return await interaction.response.send_message("❌ Debes incluir al menos una pregunta.", ephemeral=True)
@@ -220,14 +216,14 @@ class ModalConfigFormulario(discord.ui.Modal):
             "color": nuevo_color,
             "preguntas": nuevas_preguntas
         }
-        await interaction.response.send_message(f"✅ ¡Formulario de **{self.tipo.upper()}** actualizado con éxito! Total de preguntas configuradas: **{len(nuevas_preguntas)}**", ephemeral=True)
+        await interaction.response.send_message(f"✅ ¡Formulario de **{self.tipo.upper()}** actualizado! Total de preguntas: **{len(nuevas_preguntas)}**", ephemeral=True)
 
 
 class ModalConfigSistema(discord.ui.Modal, title="Configuración General y Prefijo"):
     input_prefijo = discord.ui.TextInput(label="Prefijo del Bot (ej: a¡)", default=config_global["prefijo"], required=True, max_length=5)
     rol_cmd_id = discord.ui.TextInput(label="ID Rol Ejecutar Postulación", default=str(config_global["rol_comandos_id"] or ""), required=False, max_length=20)
     rol_atc_id = discord.ui.TextInput(label="ID Rol Staff (Aprobar/Rechazar)", default=str(config_global["rol_atencion_id"] or ""), required=False, max_length=20)
-    canal_log_id = discord.ui.TextInput(label="ID Canal de Registro / Logs", default=str(config_global["canal_logs_id"] or ""), required=False, max_length=20)
+    canal_log_id = discord.ui.TextInput(label="ID Canal de Respuestas / Logs", default=str(config_global["canal_logs_id"] or ""), required=False, max_length=20)
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -236,42 +232,48 @@ class ModalConfigSistema(discord.ui.Modal, title="Configuración General y Prefi
             config_global["rol_atencion_id"] = int(self.rol_atc_id.value.strip()) if self.rol_atc_id.value.strip() else None
             config_global["canal_logs_id"] = int(self.canal_log_id.value.strip()) if self.canal_log_id.value.strip() else None
 
-            await interaction.response.send_message(f"✅ ¡Configuración general guardada con éxito! Prefijo actual: `{config_global['prefijo']}`", ephemeral=True)
+            await interaction.response.send_message(f"✅ ¡Configuración general guardada con éxito!", ephemeral=True)
         except ValueError:
-            await interaction.response.send_message("❌ Error: Asegúrate de que los IDs de roles y canales sean numéricos.", ephemeral=True)
+            await interaction.response.send_message("❌ Error: Asegúrate de que los IDs sean numéricos.", ephemeral=True)
 
 
-class VistaConfiguracion(discord.ui.View):
+# --- MENÚ DESPLEGABLE (SELECT MENU) PARA CONFIGURACIÓN ---
+
+class SelectorConfiguracion(discord.ui.Select):
+    def __init__(self):
+        options = [
+            discord.SelectOption(label="Configurar Prefijo, Roles y Canal de Respuestas", description="Ajusta prefijo, ID de roles y canal de destino", emoji="⚙️", value="sistema"),
+            discord.SelectOption(label="Configurar Formulario: Staff", description="Edita título, color y preguntas de Moderación", emoji="📝", value="staff"),
+            discord.SelectOption(label="Configurar Formulario: Casa Alianza", description="Edita título, color y preguntas de Alianza", emoji="🤝", value="ally"),
+            discord.SelectOption(label="Configurar Formulario: Redes", description="Edita título, color y preguntas de Redes", emoji="🎨", value="redes"),
+            discord.SelectOption(label="Configurar Formulario: Programación (Nexus)", description="Edita título, color y preguntas de Nexus", emoji="💻", value="nexus")
+        ]
+        super().__init__(placeholder="Elige una opción de configuración...", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        val = self.values[0]
+        if not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
+
+        if val == "sistema":
+            await interaction.response.send_modal(ModalConfigSistema())
+        elif val == "staff":
+            await interaction.response.send_modal(ModalConfigFormulario("staff", "Moderación"))
+        elif val == "ally":
+            await interaction.response.send_modal(ModalConfigFormulario("ally", "Casa Alianza"))
+        elif val == "redes":
+            await interaction.response.send_modal(ModalConfigFormulario("redes", "Cuerpo de Redes"))
+        elif val == "nexus":
+            await interaction.response.send_modal(ModalConfigFormulario("nexus", "Programación (Nexus)"))
+
+
+class VistaMenuConfiguracion(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-
-    @discord.ui.button(label="⚙️ Configurar Prefijo y Roles", style=discord.ButtonStyle.danger, row=0)
-    async def btn_sistema(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
-        await interaction.response.send_modal(ModalConfigSistema())
-
-    @discord.ui.button(label="📝 Config. Staff", style=discord.ButtonStyle.primary, row=1)
-    async def btn_staff(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ Solo admins.", ephemeral=True)
-        await interaction.response.send_modal(ModalConfigFormulario("staff", "Moderación"))
-
-    @discord.ui.button(label="📝 Config. Ally", style=discord.ButtonStyle.primary, row=1)
-    async def btn_ally(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ Solo admins.", ephemeral=True)
-        await interaction.response.send_modal(ModalConfigFormulario("ally", "Alianza"))
-
-    @discord.ui.button(label="📝 Config. Redes", style=discord.ButtonStyle.primary, row=2)
-    async def btn_redes(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ Solo admins.", ephemeral=True)
-        await interaction.response.send_modal(ModalConfigFormulario("redes", "Redes"))
-
-    @discord.ui.button(label="📝 Config. Nexus", style=discord.ButtonStyle.primary, row=2)
-    async def btn_nexus(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ Solo admins.", ephemeral=True)
-        await interaction.response.send_modal(ModalConfigFormulario("nexus", "Programación"))
+        self.add_item(SelectorConfiguracion())
 
 
-# --- FLUJO DE PREGUNTA POR PREGUNTA (CANTIDAD ILIMITADA) ---
+# --- FLUJO DE POSTULACIONES ---
 
 class VistaComenzarPostulacion(discord.ui.View):
     def __init__(self, tipo: str, num_id: int, preguntas: list, miembro_postulado: discord.Member, config_form: dict):
@@ -287,16 +289,14 @@ class VistaComenzarPostulacion(discord.ui.View):
         if interaction.user.id != self.miembro_postulado.id:
             return await interaction.response.send_message(f"❌ **Acceso denegado:** Este formulario pertenece exclusivamente a {self.miembro_postulado.mention}.", ephemeral=True)
 
-        await interaction.response.send_message("📬 ¡Perfecto! He abierto tu cuestionario interactivo. Por favor, revisa tus **Mensajes Privados (MD)** para responder pregunta por pregunta.", ephemeral=True)
+        await interaction.response.send_message("📬 ¡Cuestionario abierto en tus **Mensajes Privados (MD)**!", ephemeral=True)
 
         respuestas_usuario = []
-        
         try:
-            # Iterará dinámicamente por todas las preguntas que hayas configurado (sin importar si son 3, 10 o más)
             for i, preg in enumerate(self.preguntas):
                 embed_q = discord.Embed(
                     title=f"Pregunta {i+1} de {len(self.preguntas)}",
-                    description=f"**{preg}**\n\n*(Tienes 90 segundos para enviar tu respuesta en este chat)*",
+                    description=f"**{preg}**\n\n*(Tienes 90 segundos para enviar tu respuesta)*",
                     color=self.config_form['color']
                 )
                 await self.miembro_postulado.send(embed=embed_q)
@@ -306,9 +306,8 @@ class VistaComenzarPostulacion(discord.ui.View):
 
                 msg = await client.wait_for('message', timeout=90.0, check=check)
                 respuestas_usuario.append((preg, msg.content))
-                await self.miembro_postulado.send("✅ ¡Respuesta guardada con éxito! Siguiente pregunta...")
+                await self.miembro_postulado.send("✅ ¡Respuesta guardada!")
 
-            # Al terminar todas las preguntas, recopilar en 1 solo embed detallado
             respuestas_texto = ""
             for idx, (p, r) in enumerate(respuestas_usuario):
                 respuestas_texto += f"**P{idx+1}: {p}**\n↳ {r}\n\n"
@@ -321,12 +320,15 @@ class VistaComenzarPostulacion(discord.ui.View):
             embed_final.set_thumbnail(url=self.miembro_postulado.display_avatar.url)
             embed_final.set_footer(text="Esperando revisión del Staff.")
 
-            # Enviar embed recopilado al canal público del servidor con los botones de aprobación
-            await interaction.channel.send(embed=embed_final, view=VistaRevisionPostulacion(self.miembro_postulado))
-            await self.miembro_postulado.send("🎉 ¡Has completado todas tus preguntas! Tu postulación ha sido enviada al servidor para su revisión.")
+            # Enviar al canal de respuestas/logs configurado o al canal actual si no está configurado
+            destino_canal = interaction.guild.get_channel(config_global["canal_logs_id"]) if config_global["canal_logs_id"] else interaction.channel
+            if destino_canal:
+                await destino_canal.send(embed=embed_final, view=VistaRevisionPostulacion(self.miembro_postulado))
+
+            await self.miembro_postulado.send("🎉 ¡Postulación completada y enviada a revisión!")
 
         except asyncio.TimeoutError:
-            await self.miembro_postulado.send("⏰ Se ha agotado el tiempo límite para responder el formulario.")
+            await self.miembro_postulado.send("⏰ Tiempo agotado para responder el formulario.")
 
 
 class ModalNotaStaff(discord.ui.Modal):
@@ -357,7 +359,6 @@ class ModalNotaStaff(discord.ui.Modal):
         
         await interaction.message.edit(embed=embed_actual, view=None)
 
-        # Enviar MD al candidato
         try:
             embed_md = discord.Embed(
                 title=f"📋 Actualización de tu Postulación",
@@ -367,13 +368,6 @@ class ModalNotaStaff(discord.ui.Modal):
             await self.autor_postulacion.send(embed=embed_md)
         except:
             pass
-
-        # Enviar al canal de registro (logs)
-        if config_global["canal_logs_id"]:
-            canal_log = interaction.guild.get_channel(config_global["canal_logs_id"])
-            if canal_log:
-                try: await canal_log.send(embed=embed_actual)
-                except: pass
 
         await interaction.response.send_message("✅ Postulación procesada correctamente.", ephemeral=True)
 
@@ -394,9 +388,61 @@ class VistaRevisionPostulacion(discord.ui.View):
         await interaction.response.send_modal(ModalNotaStaff("RECHAZADO", self.autor_postulacion))
 
 
-# --- COMANDO DE CONFIGURACIÓN ---
+# --- SELECTOR DE POSTULACIONES (COMANDO ÚNICO /POSTULACION) ---
 
-@client.tree.command(name="configuracion", description="Panel visual para configurar roles, prefijo, canal de logs y formularios")
+class SelectorPostulaciones(discord.ui.Select):
+    def __init__(self, miembro: discord.Member):
+        self.miembro = miembro
+        options = [
+            discord.SelectOption(label="Cuerpo de Moderación (Staff)", description="Inicia el formulario de moderación", emoji="🛡️", value="staff"),
+            discord.SelectOption(label="Casa Alianza (Ally)", description="Inicia el formulario para alianzas", emoji="🤝", value="ally"),
+            discord.SelectOption(label="Cuerpo de Redes", description="Inicia el formulario de redes sociales", emoji="🎨", value="redes"),
+            discord.SelectOption(label="Cuerpo de Programación (Nexus)", description="Inicia el formulario de programación", emoji="💻", value="nexus")
+        ]
+        super().__init__(placeholder="Selecciona el tipo de postulación...", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        tipo = self.values[0]
+        config_form = postulaciones_config.get(tipo, {})
+        preguntas = config_form.get("preguntas", [])
+        if not preguntas: return await interaction.response.send_message("❌ Este formulario no tiene preguntas configuradas.", ephemeral=True)
+
+        config_global["contador_postulaciones"] += 1
+        num_id = config_global["contador_postulaciones"]
+
+        embed = discord.Embed(
+            title=f"{config_form['titulo']} (#{num_id})",
+            description=f"👤 **Candidato:** {self.miembro.mention}\n⚡ **Iniciado por:** {interaction.user.mention}\n\nPresiona el botón inferior para comenzar el cuestionario en tus mensajes privados (MD).",
+            color=config_form['color']
+        )
+        embed.set_thumbnail(url=self.miembro.display_avatar.url)
+
+        await interaction.response.edit_message(content=f"✅ Formulario creado para {self.miembro.mention}:", embed=embed, view=VistaComenzarPostulacion(tipo, num_id, preguntas, self.miembro, config_form))
+
+
+class VistaMenuPostulacion(discord.ui.View):
+    def __init__(self, miembro: discord.Member):
+        super().__init__(timeout=30)
+        self.add_item(SelectorPostulaciones(miembro))
+
+
+@client.tree.command(name="postulacion", description="Inicia un panel de postulación interactivo eligiendo el tipo")
+@app_commands.describe(miembro="Usuario al que se le asignará la postulación")
+async def postulacion(interaction: discord.Interaction, miembro: discord.Member):
+    if not verificar_permisos_comandos(interaction):
+        return await interaction.response.send_message("❌ No tienes permisos para ejecutar este comando.", ephemeral=True)
+
+    embed = discord.Embed(
+        title="📋 Menú de Postulaciones",
+        description=f"Selecciona en el menú desplegable de abajo el tipo de formulario que deseas abrir para **{miembro.display_name}**:",
+        color=0x3498DB
+    )
+    await interaction.response.send_message(embed=embed, view=VistaMenuPostulacion(miembro), ephemeral=True)
+
+
+# --- COMANDO DE CONFIGURACIÓN CON MENÚ DESPLEGABLE ---
+
+@client.tree.command(name="configuracion", description="Panel de configuración general con menú desplegable")
 async def configuracion(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     if not interaction.user.guild_permissions.administrator:
@@ -404,55 +450,17 @@ async def configuracion(interaction: discord.Interaction):
 
     r_cmd = interaction.guild.get_role(config_global["rol_comandos_id"]) if config_global["rol_comandos_id"] else "No asignado"
     r_atc = interaction.guild.get_role(config_global["rol_atencion_id"]) if config_global["rol_atencion_id"] else "No asignado"
-    c_log = interaction.guild.get_channel(config_global["canal_logs_id"]) if config_global["canal_logs_id"] else "No asignado"
+    c_log = interaction.guild.get_channel(config_global["canal_logs_id"]) if config_global["canal_logs_id"] else "No asignado (Se enviará al canal actual)"
 
     embed = discord.Embed(
         title="⚙️ Panel de Configuración General",
-        description=f"Prefijo actual: `{config_global['prefijo']}`\nUtiliza los botones inferiores para configurar los accesos y editar preguntas de manera ilimitada.",
+        description=f"Prefijo actual: `{config_global['prefijo']}`\nUsa el menú desplegable de abajo para editar roles, canal de respuestas o formularios.",
         color=0x3498db
     )
     embed.add_field(name="🛡️ Seguridad y Roles", value=f"• **Ejecutar Postulaciones:** {r_cmd.mention if isinstance(r_cmd, discord.Role) else r_cmd}\n• **Revisar / Staff:** {r_atc.mention if isinstance(r_atc, discord.Role) else r_atc}", inline=False)
-    embed.add_field(name="📢 Canales", value=f"• **Canal de Registro (Logs):** {c_log.mention if isinstance(c_log, discord.TextChannel) else c_log}", inline=False)
+    embed.add_field(name="📢 Canales", value=f"• **Canal de Respuestas / Logs:** {c_log.mention if isinstance(c_log, discord.TextChannel) else c_log}", inline=False)
 
-    await interaction.followup.send(embed=embed, view=VistaConfiguracion(), ephemeral=True)
-
-
-async def enviar_anuncio_postulacion(interaction: discord.Interaction, tipo: str, miembro: discord.Member):
-    if not verificar_permisos_comandos(interaction):
-        return await interaction.response.send_message("❌ No tienes permisos para usar este comando.", ephemeral=True)
-
-    config_form = postulaciones_config.get(tipo, {})
-    preguntas = config_form.get("preguntas", [])
-    if not preguntas: return await interaction.response.send_message("❌ Formulario sin preguntas configuradas.", ephemeral=True)
-
-    config_global["contador_postulaciones"] += 1
-    num_id = config_global["contador_postulaciones"]
-
-    embed = discord.Embed(
-        title=f"{config_form['titulo']} (#{num_id})",
-        description=f"👤 **Candidato:** {miembro.mention}\n⚡ **Iniciado por:** {interaction.user.mention}\n\nPresiona el botón inferior para comenzar el cuestionario pregunta por pregunta en tus mensajes privados (MD).",
-        color=config_form['color']
-    )
-    embed.set_thumbnail(url=miembro.display_avatar.url)
-
-    await interaction.channel.send(embed=embed, view=VistaComenzarPostulacion(tipo, num_id, preguntas, miembro, config_form))
-    await interaction.response.send_message(f"✅ ¡Panel de postulación `#{num_id}` enviado al canal!", ephemeral=True)
-
-@client.tree.command(name="postulacion_staff", description="Postulación a Moderación")
-@app_commands.describe(miembro="Usuario a postular")
-async def postulacion_staff(interaction: discord.Interaction, miembro: discord.Member): await enviar_anuncio_postulacion(interaction, "staff", miembro)
-
-@client.tree.command(name="postulacion_casa-ally", description="Postulación a Casa Alianza")
-@app_commands.describe(miembro="Usuario a postular")
-async def postulacion_casa_ally(interaction: discord.Interaction, miembro: discord.Member): await enviar_anuncio_postulacion(interaction, "ally", miembro)
-
-@client.tree.command(name="postulaicon_redes", description="Postulación a Redes")
-@app_commands.describe(miembro="Usuario a postular")
-async def postulaicon_redes(interaction: discord.Interaction, miembro: discord.Member): await enviar_anuncio_postulacion(interaction, "redes", miembro)
-
-@client.tree.command(name="postulacion_nexus", description="Postulación a Programación")
-@app_commands.describe(miembro="Usuario a postular")
-async def postulacion_nexus(interaction: discord.Interaction, miembro: discord.Member): await enviar_anuncio_postulacion(interaction, "nexus", miembro)
+    await interaction.followup.send(embed=embed, view=VistaMenuConfiguracion(), ephemeral=True)
 
 
 # ==========================================
@@ -483,7 +491,7 @@ async def dado(interaction: discord.Interaction, caras: int = 6):
 async def ppt(interaction: discord.Interaction, eleccion: str):
     bot_elec = random.choice(["piedra", "papel", "tijera"])
     if eleccion == bot_elec: res = "¡Empate! 🤝"
-    elif (eleccion == "piedra" and bot_elec == "tijera") or (eleccion == "papel" and bot_elec == "piedra") or (eleccion == "tijera" and bot_elec == "papel"): res = "¡Ganaste! 🎉"
+    elif (eleccion == "piedra" and bot_eleec == "tijera") or (eleccion == "papel" and bot_elec == "piedra") or (eleccion == "tijera" and bot_elec == "papel"): res = "¡Ganaste! 🎉"
     else: res = "¡Gané yo! 🤖"
     await interaction.response.send_message(f"Elegiste **{eleccion}**, yo **{bot_elec}**. {res}")
 
@@ -538,7 +546,7 @@ class SelectorCategoriaTrivia(discord.ui.Select):
     def __init__(self):
         options = [
             discord.SelectOption(label="Anime", emoji="⛩️", value="Anime"),
-            discord.SelectOption(label="Historia", emoji="🏛️", value="Historia")
+            discord.SelectOption(label="Historia", emoji="🏛️️", value="Historia")
         ]
         super().__init__(placeholder="Elige categoría...", options=options)
 
