@@ -11,6 +11,8 @@ config_global = {
     "prefijo": "a¡",
     "rol_organizar_eventos_id": None, 
     "rol_aprobar_sugerencias_id": None, 
+    "rol_ejecutar_postulaciones_id": None, # Rol para usar /postulacion
+    "rol_aprobar_postulaciones_id": None,  # Rol para Aprobar/Rechazar postulaciones
     "canal_sanciones_id": None, 
     "canal_sugerencias_id": None, 
     "canal_postulaciones_id": None, # Canal global para recibir postulaciones
@@ -305,7 +307,25 @@ class VistaBotonConfigGeneral(discord.ui.View):
                 await i.response.send_message(f"✅ Rol de sugerencias actualizado.", ephemeral=True)
         await interaction.response.send_modal(M())
 
-    @discord.ui.button(label="🛡️ Canal Sanciones", style=discord.ButtonStyle.primary, row=1)
+    @discord.ui.button(label="📋 Rol Ejecutar Post.", style=discord.ButtonStyle.secondary, row=1)
+    async def set_rolejecutarpost(self, interaction: discord.Interaction, button: discord.ui.Button):
+        class M(discord.ui.Modal, title="Configurar Rol Ejecutar Postulaciones"):
+            v = discord.ui.TextInput(label="ID del Rol", default=str(config_global["rol_ejecutar_postulaciones_id"] or ""), max_length=20)
+            async def on_submit(self, i: discord.Interaction):
+                config_global["rol_ejecutar_postulaciones_id"] = int(self.v.value.strip()) if self.v.value.strip() else None
+                await i.response.send_message(f"✅ Rol para ejecutar postulaciones actualizado.", ephemeral=True)
+        await interaction.response.send_modal(M())
+
+    @discord.ui.button(label="✅ Rol Aprobar Post.", style=discord.ButtonStyle.secondary, row=1)
+    async def set_rolaprobarpost(self, interaction: discord.Interaction, button: discord.ui.Button):
+        class M(discord.ui.Modal, title="Configurar Rol Aprobar Postulaciones"):
+            v = discord.ui.TextInput(label="ID del Rol", default=str(config_global["rol_aprobar_postulaciones_id"] or ""), max_length=20)
+            async def on_submit(self, i: discord.Interaction):
+                config_global["rol_aprobar_postulaciones_id"] = int(self.v.value.strip()) if self.v.value.strip() else None
+                await i.response.send_message(f"✅ Rol para aprobar postulaciones actualizado.", ephemeral=True)
+        await interaction.response.send_modal(M())
+
+    @discord.ui.button(label="🛡️ Canal Sanciones", style=discord.ButtonStyle.primary, row=2)
     async def set_canalsancion(self, interaction: discord.Interaction, button: discord.ui.Button):
         class M(discord.ui.Modal, title="Configurar Canal Sanciones"):
             v = discord.ui.TextInput(label="ID del Canal", default=str(config_global["canal_sanciones_id"] or ""), max_length=20)
@@ -314,7 +334,7 @@ class VistaBotonConfigGeneral(discord.ui.View):
                 await i.response.send_message(f"✅ Canal de sanciones actualizado.", ephemeral=True)
         await interaction.response.send_modal(M())
 
-    @discord.ui.button(label="📢 Canal Sugerencias", style=discord.ButtonStyle.primary, row=1)
+    @discord.ui.button(label="📢 Canal Sugerencias", style=discord.ButtonStyle.primary, row=2)
     async def set_canalsug(self, interaction: discord.Interaction, button: discord.ui.Button):
         class M(discord.ui.Modal, title="Configurar Canal Sugerencias"):
             v = discord.ui.TextInput(label="ID del Canal", default=str(config_global["canal_sugerencias_id"] or ""), max_length=20)
@@ -323,7 +343,7 @@ class VistaBotonConfigGeneral(discord.ui.View):
                 await i.response.send_message(f"✅ Canal de sugerencias actualizado.", ephemeral=True)
         await interaction.response.send_modal(M())
 
-    @discord.ui.button(label="📋 Canal Global Postulaciones", style=discord.ButtonStyle.success, row=1)
+    @discord.ui.button(label="📋 Canal Global Postulaciones", style=discord.ButtonStyle.success, row=2)
     async def set_canallogs(self, interaction: discord.Interaction, button: discord.ui.Button):
         class M(discord.ui.Modal, title="Configurar Canal Global Postulaciones"):
             v = discord.ui.TextInput(label="ID del Canal", default=str(config_global["canal_postulaciones_id"] or ""), max_length=20)
@@ -346,6 +366,8 @@ async def confi_general(interaction: discord.Interaction):
     embed.add_field(name="📌 Prefijo actual", value=f"`{config_global['prefijo']}`", inline=True)
     embed.add_field(name="👑 Rol Organizar Eventos", value=f"<@&{config_global['rol_organizar_eventos_id']}>" if config_global['rol_organizar_eventos_id'] else "No configurado", inline=True)
     embed.add_field(name="💡 Rol Aprobar Sugerencias", value=f"<@&{config_global['rol_aprobar_sugerencias_id']}>" if config_global['rol_aprobar_sugerencias_id'] else "No configurado", inline=True)
+    embed.add_field(name="📋 Rol Ejecutar Postulaciones", value=f"<@&{config_global['rol_ejecutar_postulaciones_id']}>" if config_global['rol_ejecutar_postulaciones_id'] else "No configurado", inline=True)
+    embed.add_field(name="✅ Rol Aprobar Postulaciones", value=f"<@&{config_global['rol_aprobar_postulaciones_id']}>" if config_global['rol_aprobar_postulaciones_id'] else "No configurado", inline=True)
     embed.add_field(name="🛡️ Canal Sanciones", value=f"<#{config_global['canal_sanciones_id']}>" if config_global['canal_sanciones_id'] else "No configurado", inline=True)
     embed.add_field(name="📢 Canal Sugerencias", value=f"<#{config_global['canal_sugerencias_id']}>" if config_global['canal_sugerencias_id'] else "No configurado", inline=True)
     embed.add_field(name="📋 Canal Global Postulaciones", value=f"<#{config_global['canal_postulaciones_id']}>" if config_global['canal_postulaciones_id'] else "No configurado", inline=True)
@@ -354,7 +376,7 @@ async def confi_general(interaction: discord.Interaction):
 
 
 # ==========================================
-# 📋 SISTEMA DE POSTULACIONES (DECORACIÓN Y PREGUNTAS)
+# 📋 SISTEMA DE POSTULACIONES (PÚBLICO Y CON ROLES)
 # ==========================================
 
 class ModalEditarDecoracionFormulario(discord.ui.Modal):
@@ -413,11 +435,11 @@ class VistaSubMenuConfigPost(discord.ui.View):
         self.post_key = post_key
         self.cfg = cfg
 
-    @discord.ui.button(label="🎨 Editar Decoración del Panel", style=discord.ButtonStyle.primary, emoji="✨")
+    @discord.ui.button(label="🎨 Editar Decoración", style=discord.ButtonStyle.primary, emoji="✨")
     async def btn_decorar(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ModalEditarDecoracionFormulario(self.post_key, self.cfg))
 
-    @discord.ui.button(label="📝 Editar Preguntas del Cuestionario", style=discord.ButtonStyle.success, emoji="📋")
+    @discord.ui.button(label="📝 Editar Preguntas", style=discord.ButtonStyle.success, emoji="📋")
     async def btn_preguntas(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ModalEditarPreguntasFormulario(self.post_key, self.cfg))
 
@@ -426,23 +448,23 @@ class VistaBotonesConfigurarPostulaciones(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=180)
 
-    @discord.ui.button(label="🛡️ Configurar Postulación Staff", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="🛡️ Configurar Staff", style=discord.ButtonStyle.primary, row=0)
     async def btn_staff(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("Selecciona qué deseas editar de **Staff**:", view=VistaSubMenuConfigPost("staff", postulaciones_config["staff"]), ephemeral=True)
 
-    @discord.ui.button(label="🤝 Configurar Postulación Alianza", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label="🤝 Configurar Alianza", style=discord.ButtonStyle.success, row=0)
     async def btn_ally(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("Selecciona qué deseas editar de **Alianza**:", view=VistaSubMenuConfigPost("ally", postulaciones_config["ally"]), ephemeral=True)
 
 
-@client.tree.command(name="configurar-postulaciones", description="Edita la decoración (títulos, descripciones, colores) o preguntas")
+@client.tree.command(name="configurar-postulaciones", description="Edita la decoración o preguntas de los formularios")
 async def configurar_postulaciones(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
 
     embed = discord.Embed(
         title="⚙️ Configurar Formularios de Postulación",
-        description="Elige qué formulario deseas configurar (decoración visual o preguntas):",
+        description="Elige qué formulario deseas configurar:",
         color=0x3498DB
     )
     await interaction.response.send_message(embed=embed, view=VistaBotonesConfigurarPostulaciones(), ephemeral=True)
@@ -456,7 +478,13 @@ class VistaVeredictoPostulacion(discord.ui.View):
 
     @discord.ui.button(label="✅ Aprobar", style=discord.ButtonStyle.success, custom_id="btn_aprobar_post")
     async def aprobar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not interaction.user.guild_permissions.administrator and not interaction.user.guild_permissions.manage_guild:
+        rol_req_id = config_global["rol_aprobar_postulaciones_id"]
+        tiene_permiso = interaction.user.guild_permissions.administrator or interaction.user.guild_permissions.manage_guild
+        if not tiene_permiso and rol_req_id:
+            rol = interaction.guild.get_role(rol_req_id)
+            if rol and rol in interaction.user.roles: tiene_permiso = True
+
+        if not tiene_permiso:
             return await interaction.response.send_message("❌ No tienes permisos para aprobar postulaciones.", ephemeral=True)
 
         for child in self.children: child.disabled = True
@@ -480,7 +508,13 @@ class VistaVeredictoPostulacion(discord.ui.View):
 
     @discord.ui.button(label="❌ Rechazar", style=discord.ButtonStyle.danger, custom_id="btn_rechazar_post")
     async def rechazar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not interaction.user.guild_permissions.administrator and not interaction.user.guild_permissions.manage_guild:
+        rol_req_id = config_global["rol_aprobar_postulaciones_id"]
+        tiene_permiso = interaction.user.guild_permissions.administrator or interaction.user.guild_permissions.manage_guild
+        if not tiene_permiso and rol_req_id:
+            rol = interaction.guild.get_role(rol_req_id)
+            if rol and rol in interaction.user.roles: tiene_permiso = True
+
+        if not tiene_permiso:
             return await interaction.response.send_message("❌ No tienes permisos para rechazar postulaciones.", ephemeral=True)
 
         for child in self.children: child.disabled = True
@@ -510,7 +544,6 @@ class VistaComenzarPostulacion(discord.ui.View):
 
     @discord.ui.button(label="🚀 Comenzar Postulación", style=discord.ButtonStyle.success)
     async def comenzar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # CANDADO SEGURO ESTRICTO
         if interaction.user.id != self.miembro_postulado.id:
             return await interaction.response.send_message("🔒 **Candado Seguro:** Este formulario es exclusivo para el usuario mencionado y no puedes iniciarlo.", ephemeral=True)
         
@@ -544,10 +577,17 @@ class VistaComenzarPostulacion(discord.ui.View):
             except: pass
 
 
-@client.tree.command(name="postulacion", description="Envía el panel de postulación (Staff o Ally) para un usuario")
+@client.tree.command(name="postulacion", description="Envía el panel público de postulación para un usuario")
 async def postulacion(interaction: discord.Interaction, miembro: discord.Member):
-    if not interaction.user.guild_permissions.administrator and not interaction.user.guild_permissions.manage_guild:
-        return await interaction.response.send_message("❌ No tienes permisos para gestionar postulaciones.", ephemeral=True)
+    # Verificación de rol para ejecutar comandos de postulación
+    rol_req_id = config_global["rol_ejecutar_postulaciones_id"]
+    tiene_permiso = interaction.user.guild_permissions.administrator or interaction.user.guild_permissions.manage_guild
+    if not tiene_permiso and rol_req_id:
+        rol = interaction.guild.get_role(rol_req_id)
+        if rol and rol in interaction.user.roles: tiene_permiso = True
+
+    if not tiene_permiso:
+        return await interaction.response.send_message("❌ No tienes permisos para ejecutar este comando de postulación.", ephemeral=True)
 
     v = discord.ui.View(timeout=60)
     s = discord.ui.Select(
@@ -572,10 +612,12 @@ async def postulacion(interaction: discord.Interaction, miembro: discord.Member)
         if miembro.display_avatar:
             embed_panel.set_thumbnail(url=miembro.display_avatar.url)
 
-        await i.response.edit_message(content=f"✅ Formulario listo para {miembro.mention}.", embed=embed_panel, view=VistaComenzarPostulacion(tipo_sel, num_id, cfg["preguntas"], miembro, cfg))
+        # Se envía PÚBLICAMENTE al canal para que TODOS lo vean
+        await i.response.send_message(content=f"📋 Panel de postulación para {miembro.mention}:", embed=embed_panel, view=VistaComenzarPostulacion(tipo_sel, num_id, cfg["preguntas"], miembro, cfg))
 
     s.callback = cb
     v.add_item(s)
+    # Menú inicial público
     await interaction.response.send_message(embed=discord.Embed(title="📋 Menú de Postulaciones", description=f"Selecciona el formulario para {miembro.mention}:"), view=v, ephemeral=True)
 
 
@@ -819,7 +861,7 @@ async def iniciar_evento(interaction: discord.Interaction):
 @client.tree.command(name="lista-eventos", description="Muestra todos los eventos activos")
 async def lista_eventos(interaction: discord.Interaction):
     if not eventos_activos:
-        return await interaction.response.send_message("🛡️️ No hay eventos activos.", ephemeral=True)
+        return await interaction.response.send_message("🛡️ No hay eventos activos.", ephemeral=True)
 
     embed = discord.Embed(title="📊 Lista de Eventos Activos", color=0x9B59B6)
     guild = interaction.guild
