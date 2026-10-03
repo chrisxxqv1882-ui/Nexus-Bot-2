@@ -10,7 +10,7 @@ from discord import app_commands
 config_global = {
     "prefijo": "a¡",
     "rol_comandos_id": None,  
-    "rol_atencion_id": None,   
+    "rol_atencion_id": None,   # Rol autorizado para atender tickets y postulaciones
     "canal_logs_id": None,     
     "canal_sanciones_id": None, 
     "canal_tickets_id": None,  
@@ -37,8 +37,8 @@ config_global = {
 }
 
 registro_antispam = defaultdict(list)
-base_datos_sanciones = defaultdict(list)
-eventos_activos = {} # ID del mensaje del evento -> {"nombre": str, "participantes": set(user_ids), "organizador": str}
+base_datos_sanciones = defaultdict(list) # usuario_id -> lista de sanciones
+eventos_activos = {} # ID del mensaje del evento -> dict con datos y participantes
 
 postulaciones_config = {
     "staff": {
@@ -109,6 +109,16 @@ async def on_ready():
     print(f'¡Bot conectado con éxito como {client.user}!')
 
 
+# --- FUNCIÓN AUXILIAR PARA LOGS DE SANCIONES ---
+async def registrar_log_sancion(guild: discord.Guild, embed: discord.Embed):
+    canal_id = config_global["canal_sanciones_id"]
+    if canal_id:
+        canal = guild.get_channel(canal_id)
+        if canal:
+            try: await canal.send(embed=embed)
+            except: pass
+
+
 # --- SISTEMA ANTI-BOTS AUTOMÁTICO ---
 @client.event
 async def on_member_join(member):
@@ -121,11 +131,8 @@ async def on_member_join(member):
                     if invitador and not invitador.guild_permissions.administrator:
                         await member.guild.ban(invitador, reason="Anti-Bots: Invitó un bot no autorizado")
                     
-                    canal_id = config_global["canal_sanciones_id"]
-                    if canal_id:
-                        c = member.guild.get_channel(canal_id)
-                        if c:
-                            await c.send(embed=discord.Embed(title="🤖 Anti-Bots Activado", description=f"Bot no autorizado {member.mention} baneado.\nInvitador: {invitador.mention if invitador else 'Desconocido'}", color=discord.Color.red()))
+                    embed_log = discord.Embed(title="🤖 Anti-Bots Activado", description=f"Bot no autorizado {member.mention} baneado.\nInvitador: {invitador.mention if invitador else 'Desconocido'}", color=discord.Color.red())
+                    await registrar_log_sancion(member.guild, embed_log)
                     break
         except Exception as e:
             print(f"Error en anti-bots: {e}")
@@ -151,13 +158,10 @@ async def on_message(message):
                 await message.author.timeout(discord.utils.utcnow() + discord.Timedelta(seconds=duracion_timeout), reason="Anti-spam automático")
                 base_datos_sanciones[autor_id].append(f"🔇 **Timeout automático por Spam** ({duracion_timeout}s)")
                 
-                canal_id = config_global["canal_sanciones_id"]
-                if canal_id:
-                    c = message.guild.get_channel(canal_id)
-                    if c:
-                        await c.send(embed=discord.Embed(title="🔇 Timeout Automático", description=f"**Usuario:** {message.author.mention}\n**Duración:** {duracion_timeout}s", color=discord.Color.orange()))
+                embed_log = discord.Embed(title="🔇 Timeout Automático (Anti-Spam)", description=f"**Usuario:** {message.author.mention}\n**Duración:** {duracion_timeout}s", color=discord.Color.orange())
+                await registrar_log_sancion(message.guild, embed_log)
 
-                warning = await message.channel.send(f"⚠️️ {message.author.mention} ha recibido un **Timeout de {duracion_timeout} segundos** por spam.")
+                warning = await message.channel.send(f"⚠️ {message.author.mention} ha recibido un **Timeout de {duracion_timeout} segundos** por spam.")
                 await asyncio.sleep(5)
                 await warning.delete()
             except Exception as e:
@@ -186,10 +190,7 @@ class ModalEditarPanelTicket(discord.ui.Modal, title="Editar Panel Principal de 
         config_global["ticket_imagen"] = self.imagen.value.strip()
         config_global["ticket_desc"] = self.descripcion.value.strip()
 
-        embed_preview = discord.Embed(title=config_global["ticket_titulo"], description=config_global["ticket_desc"], color=config_global["ticket_color"])
-        if config_global["ticket_imagen"]: embed_preview.set_image(url=config_global["ticket_imagen"])
-
-        await interaction.response.send_message("✅ ¡Panel de tickets actualizado con éxito! Vista previa:", embed=embed_preview, ephemeral=True)
+        await interaction.response.send_message("✅ ¡Panel de tickets actualizado con éxito!", ephemeral=True)
 
 
 class ModalEditarBienvenidaTicket(discord.ui.Modal, title="Editar Embed de Bienvenida (Ticket)"):
@@ -238,7 +239,7 @@ class VistaEditorVisualTickets(discord.ui.View):
     async def btn_panel(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ModalEditarPanelTicket())
 
-    @discord.ui.button(label="💬 Editar Mensaje de Bienvenida", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label="💬 Editar Bienvenida", style=discord.ButtonStyle.success, row=0)
     async def btn_bienvenida(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ModalEditarBienvenidaTicket())
 
@@ -246,8 +247,8 @@ class VistaEditorVisualTickets(discord.ui.View):
 class SelectorConfiguracion(discord.ui.Select):
     def __init__(self):
         options = [
-            discord.SelectOption(label="Editor Visual de Tickets", description="Modifica panel, bienvenida e imágenes", emoji="🎨", value="editor_tickets"),
-            discord.SelectOption(label="Configurar Canal de Panel", description="Define el ID del canal del panel de tickets", emoji="📢", value="canal_panel")
+            discord.SelectOption(label="Editor Visual de Tickets (Panel y Bienvenida)", description="Modifica títulos, colores e imágenes", emoji="🎨", value="editor_tickets"),
+            discord.SelectOption(label="Configurar Canal del Panel", description="Define el ID del canal del panel de tickets", emoji="📢", value="canal_panel")
         ]
         super().__init__(placeholder="Elige una opción...", min_values=1, max_values=1, options=options)
 
@@ -257,7 +258,7 @@ class SelectorConfiguracion(discord.ui.Select):
             return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
 
         if val == "editor_tickets":
-            await interaction.response.send_message(embed=discord.Embed(title="✨ Editor Visual", description="Usa los botones inferiores:", color=0x5865F2), view=VistaEditorVisualTickets(), ephemeral=True)
+            await interaction.response.send_message(embed=discord.Embed(title="✨ Editor Visual de Tickets", description="Usa los botones inferiores:", color=0x5865F2), view=VistaEditorVisualTickets(), ephemeral=True)
         elif val == "canal_panel":
             class ModalCanalPanel(discord.ui.Modal, title="Canal del Panel"):
                 c_id = discord.ui.TextInput(label="ID del Canal", default=str(config_global["canal_tickets_id"] or ""), required=True, max_length=20)
@@ -277,7 +278,7 @@ async def configuracion(interaction: discord.Interaction):
     await interaction.response.send_message(embed=discord.Embed(title="⚙️ Panel de Configuración", description="Selecciona:", color=0x3498db), view=VistaMenuConfiguracion(), ephemeral=True)
 
 
-@client.tree.command(name="confi-general", description="Configura prefijo, roles y canales")
+@client.tree.command(name="confi-general", description="Configura prefijo, roles y canales de logs")
 async def confi_general(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
     await interaction.response.send_modal(ModalConfigGeneral())
@@ -298,78 +299,102 @@ async def antibots(interaction: discord.Interaction, estado: str):
 
 
 # ==========================================
-# 📅 SISTEMA DE EVENTOS Y PARTICIPACIÓN
+# 📅 SISTEMA DE EVENTOS TIEMPO REAL (PÚBLICO)
 # ==========================================
 
 class VistaEventoParticipar(discord.ui.View):
-    def __init__(self, nombre_evento: str):
+    def __init__(self):
         super().__init__(timeout=None)
-        self.nombre_evento = nombre_evento
 
-    @discord.ui.button(label="🎉 Participar", style=discord.ButtonStyle.success, custom_id="btn_participar_evento")
+    @discord.ui.button(label="🎉 Participar", style=discord.ButtonStyle.success, custom_id="btn_participar_evento_rt")
     async def participar(self, interaction: discord.Interaction, button: discord.ui.Button):
         msg_id = interaction.message.id
-        if msg_id in eventos_activos:
-            participantes = eventos_activos[msg_id]["participantes"]
-            if interaction.user.id in participantes:
-                participantes.remove(interaction.user.id)
-                await interaction.response.send_message("❌ Te has **retirado** de la lista de participantes de este evento.", ephemeral=True)
-            else:
-                participantes.add(interaction.user.id)
-                await interaction.response.send_message("✅ ¡Te has **unido** exitosamente a la lista del evento!", ephemeral=True)
+        if msg_id not in eventos_activos:
+            return await interaction.response.send_message("❌ Este evento ya no está activo.", ephemeral=True)
+
+        datos = eventos_activos[msg_id]
+        participantes = datos["participantes"]
+
+        if interaction.user.id in participantes:
+            participantes.remove(interaction.user.id)
+            estado_msj = "❌ Te has **retirado** del evento."
         else:
-            await interaction.response.send_message("❌ Este evento ya no está registrado activamente.", ephemeral=True)
+            participantes.add(interaction.user.id)
+            estado_msj = "✅ ¡Te has **unido** exitosamente al evento!"
+
+        guild = interaction.guild
+        nombres = [guild.get_member(uid).display_name for uid in participantes if guild.get_member(uid)]
+        lista_nombres_str = ", ".join(nombres) if nombres else "Nadie apuntado aún"
+
+        embed_viejo = interaction.message.embeds[0]
+        embed_nuevo = discord.Embed(
+            title=embed_viejo.title,
+            description=embed_viejo.description.split("\n\n👑")[0],
+            color=embed_viejo.color
+        )
+        embed_nuevo.add_field(name="👑 Organizadores", value=datos["organizadores"], inline=False)
+        embed_nuevo.add_field(name="⏰ Inicio", value=datos["tiempo"], inline=True)
+        embed_nuevo.add_field(name="🏆 Ganadores", value=datos["ganadores"], inline=True)
+        embed_nuevo.add_field(name=f"👥 Participantes ({len(participantes)})", value=lista_nombres_str, inline=False)
+        
+        if embed_viejo.image.url:
+            embed_nuevo.set_image(url=embed_viejo.image.url)
+
+        await interaction.message.edit(embed=embed_nuevo)
+        await interaction.response.send_message(estado_msj, ephemeral=True)
 
 
-@client.tree.command(name="organizar-evento", description="Organiza un evento con ping y lista de participación")
-@app_commands.describe(nombre="Nombre del evento", canal="Canal donde se enviará", texto="Descripción o detalles", mencion="Rol o mención a avisar (ej: @everyone o un rol)")
-async def organizar_evento(interaction: discord.Interaction, nombre: str, canal: discord.TextChannel, texto: str, mencion: str = ""):
+@client.tree.command(name="organizar-evento", description="Organiza un evento con múltiples organizadores y tiempo real")
+@app_commands.describe(
+    nombre="Nombre del evento", 
+    canal="Canal donde se publicará", 
+    texto="Descripción del evento", 
+    organizadores="Nombres de los organizadores (ej: @Mod1, @Mod2)",
+    tiempo="¿Cuándo empieza? (ej: Mañana a las 5 PM)",
+    ganadores="Número de ganadores (ej: 3 ganadores)",
+    mencion="Rol a pingo avisar (ej: @everyone)"
+)
+async def organizar_evento(interaction: discord.Interaction, nombre: str, canal: discord.TextChannel, texto: str, organizadores: str, tiempo: str, ganadores: str, mencion: str = ""):
     if not interaction.user.guild_permissions.manage_events and not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message("❌ No tienes permisos para organizar eventos.", ephemeral=True)
 
-    embed = discord.Embed(
-        title=f"📅 ¡Nuevo Evento: {nombre}!",
-        description=f"{texto}\n\n👤 **Organizado por:** {interaction.user.mention}\n👥 **Participantes:** 0 apuntados",
-        color=0xE91E63
-    )
-    embed.set_footer(text="Haz clic en el botón inferior para participar.")
+    embed = discord.Embed(title=f"📅 ¡Evento: {nombre}!", description=texto, color=0xE91E63)
+    embed.add_field(name="👑 Organizadores", value=organizadores, inline=False)
+    embed.add_field(name="⏰ Inicio", value=tiempo, inline=True)
+    embed.add_field(name="🏆 Ganadores", value=ganadores, inline=True)
+    embed.add_field(name="👥 Participantes (0)", value="Nadie apuntado aún", inline=False)
+    embed.set_footer(text="Haz clic en el botón inferior para unirte en tiempo real.")
 
-    contenido_ping = f"{mencion}" if mencion else ""
-    mensaje_enviado = await canal.send(content=contenido_ping, embed=embed, view=VistaEventoParticipar(nombre))
-    
-    # Registrar en memoria
-    eventos_activos[mensaje_enviado.id] = {
+    mensaje = await canal.send(content=mencion if mencion else "", embed=embed, view=VistaEventoParticipar())
+
+    eventos_activos[mensaje.id] = {
         "nombre": nombre,
+        "organizadores": organizadores,
+        "tiempo": tiempo,
+        "ganadores": ganadores,
         "participantes": set(),
-        "organizador": interaction.user.display_name,
         "canal_id": canal.id
     }
 
-    await interaction.response.send_message(f"✅ ¡Evento **{nombre}** publicado con éxito en {canal.mention}!", ephemeral=True)
+    await interaction.response.send_message(f"✅ ¡Evento **{nombre}** creado y publicado correctamente en {canal.mention}!", ephemeral=True)
 
 
-@client.tree.command(name="lista-eventos", description="Muestra la lista de todos los eventos activos y sus participantes")
+@client.tree.command(name="lista-eventos", description="Muestra todos los eventos activos y sus participantes")
 async def lista_eventos(interaction: discord.Interaction):
     if not eventos_activos:
-        return await interaction.response.send_message("🛡️ No hay ningún evento activo registrado en este momento.", ephemeral=True)
+        return await interaction.response.send_message("🛡️ No hay eventos activos en este momento.", ephemeral=True)
 
-    embed = discord.Embed(title="📊 Lista de Eventos Activos y Participantes", color=0x9B59B6)
-    
+    embed = discord.Embed(title="📊 Lista General de Eventos Activos", color=0x9B59B6)
+    guild = interaction.guild
+
     for msg_id, datos in eventos_activos.items():
-        nombres_participantes = []
-        guild = interaction.guild
         canal = guild.get_channel(datos["canal_id"])
-        
-        for uid in datos["participantes"]:
-            m = guild.get_member(uid)
-            if m: nombres_participantes.append(m.display_name)
-        
-        lista_str = ", ".join(nombres_participantes) if nombres_participantes else "Nadie apuntado aún"
-        enlace_canal = canal.mention if canal else "Canal desconocido"
+        nombres = [guild.get_member(uid).display_name for uid in datos["participantes"] if guild.get_member(uid)]
+        lista_str = ", ".join(nombres) if nombres else "Nadie apuntado"
         
         embed.add_field(
-            name=f"📌 {datos['nombre']} (Canal: {enlace_canal})",
-            value=f"**Organizador:** {datos['organizador']}\n**Participantes ({len(datos['participantes'])}):** {lista_str}",
+            name=f"📌 {datos['nombre']} ({canal.mention if canal else 'Canal'})",
+            value=f"**Organizadores:** {datos['organizadores']}\n**Inicio:** {datos['tiempo']} | **Ganadores:** {datos['ganadores']}\n**Participantes ({len(datos['participantes'])}):** {lista_str}",
             inline=False
         )
 
@@ -377,31 +402,29 @@ async def lista_eventos(interaction: discord.Interaction):
 
 
 # ==========================================
-# 🎫 SISTEMA DE TICKETS (CON IMAGEN Y RECLAMACIÓN)
+# 🎫 SISTEMA DE TICKETS (CON RECLAMACIÓN)
 # ==========================================
 
 class VistaTicketActivo(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
+    def __init__(self): super().__init__(timeout=None)
 
-    @discord.ui.button(label="🙋‍♂️ Reclamar Ticket", style=discord.ButtonStyle.primary, custom_id="btn_reclamar_ticket")
+    @discord.ui.button(label="🙋‍♂️ Reclamar Ticket", style=discord.ButtonStyle.primary, custom_id="btn_reclamar_ticket_rt")
     async def reclamar(self, interaction: discord.Interaction, button: discord.ui.Button):
         rol_staff_id = config_global["rol_atencion_id"]
-        es_staff = False
-        if interaction.user.guild_permissions.administrator: es_staff = True
-        elif rol_staff_id:
+        es_staff = interaction.user.guild_permissions.administrator
+        if not es_staff and rol_staff_id:
             rol = interaction.guild.get_role(rol_staff_id)
             if rol and rol in interaction.user.roles: es_staff = True
 
-        if not es_staff: return await interaction.response.send_message("❌ No tienes el rol de staff autorizado.", ephemeral=True)
+        if not es_staff: return await interaction.response.send_message("❌ No tienes permisos de staff.", ephemeral=True)
         
         button.disabled = True
         button.label = f"Reclamado por {interaction.user.display_name}"
         button.style = discord.ButtonStyle.secondary
         await interaction.message.edit(view=self)
-        await interaction.response.send_message(f"🙋‍♂️ {interaction.user.mention} ha tomado este ticket.")
+        await interaction.response.send_message(f"🙋‍♂️ {interaction.user.mention} ha reclamado este ticket.")
 
-    @discord.ui.button(label="🔒 Cerrar Ticket", style=discord.ButtonStyle.danger, custom_id="btn_cerrar_ticket")
+    @discord.ui.button(label="🔒 Cerrar Ticket", style=discord.ButtonStyle.danger, custom_id="btn_cerrar_ticket_rt")
     async def cerrar(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("🔒 Cerrando canal en 5 segundos...", ephemeral=False)
         await asyncio.sleep(5)
@@ -412,32 +435,30 @@ class VistaTicketActivo(discord.ui.View):
 class VistaCrearTicket(discord.ui.View):
     def __init__(self): super().__init__(timeout=None)
 
-    @discord.ui.button(label=config_global["ticket_boton_texto"], style=discord.ButtonStyle.success, custom_id="btn_abrir_ticket")
+    @discord.ui.button(label=config_global["ticket_boton_texto"], style=discord.ButtonStyle.success, custom_id="btn_abrir_ticket_rt")
     async def abrir(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild = interaction.guild
-        categoria = discord.utils.get(guild.categories, name="Tickets")
-        if not categoria:
-            try: categoria = await guild.create_category("Tickets")
-            except: categoria = None
+        cat = discord.utils.get(guild.categories, name="Tickets")
+        if not cat: 
+            try: cat = await guild.create_category("Tickets")
+            except: cat = None
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
             guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True)
         }
-        
         if config_global["rol_atencion_id"]:
-            rol_staff = guild.get_role(config_global["rol_atencion_id"])
-            if rol_staff: overwrites[rol_staff] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+            r = guild.get_role(config_global["rol_atencion_id"])
+            if r: overwrites[r] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
 
-        canal_ticket = await guild.create_text_channel(name=f"ticket-{interaction.user.name}", category=categoria, overwrites=overwrites)
-
+        canal = await guild.create_text_channel(name=f"ticket-{interaction.user.name}", category=cat, overwrites=overwrites)
         desc = config_global["ticket_bienvenida_desc"].replace("$(user.mention)", interaction.user.mention).replace("$(user.name)", interaction.user.name).replace("$(guild.name)", guild.name)
-        embed_bienvenida = discord.Embed(title=config_global["ticket_bienvenida_titulo"], description=desc, color=config_global["ticket_bienvenida_color"])
-        if config_global["ticket_bienvenida_imagen"]: embed_bienvenida.set_image(url=config_global["ticket_bienvenida_imagen"])
+        embed = discord.Embed(title=config_global["ticket_bienvenida_titulo"], description=desc, color=config_global["ticket_bienvenida_color"])
+        if config_global["ticket_bienvenida_imagen"]: embed.set_image(url=config_global["ticket_bienvenida_imagen"])
         
-        await canal_ticket.send(embed=embed_bienvenida, view=VistaTicketActivo())
-        await interaction.response.send_message(f"✅ ¡Ticket creado en {canal_ticket.mention}!", ephemeral=True)
+        await canal.send(embed=embed, view=VistaTicketActivo())
+        await interaction.response.send_message(f"✅ ¡Ticket creado en {canal.mention}!", ephemeral=True)
 
 
 @client.tree.command(name="ticket", description="Envía el panel de tickets")
@@ -446,9 +467,9 @@ async def ticket(interaction: discord.Interaction):
     embed = discord.Embed(title=config_global["ticket_titulo"], description=config_global["ticket_desc"], color=config_global["ticket_color"])
     if config_global["ticket_imagen"]: embed.set_image(url=config_global["ticket_imagen"])
     
-    canal_destino = interaction.guild.get_channel(config_global["canal_tickets_id"]) if config_global["canal_tickets_id"] else interaction.channel
-    await canal_destino.send(embed=embed, view=VistaCrearTicket())
-    await interaction.response.send_message(f"✅ Panel enviado a {canal_destino.mention}.", ephemeral=True)
+    destino = interaction.guild.get_channel(config_global["canal_tickets_id"]) if config_global["canal_tickets_id"] else interaction.channel
+    await destino.send(embed=embed, view=VistaCrearTicket())
+    await interaction.response.send_message(f"✅ Panel enviado a {destino.mention}.", ephemeral=True)
 
 
 # ==========================================
@@ -495,7 +516,7 @@ async def postulacion(interaction: discord.Interaction, miembro: discord.Member)
 
 
 # ==========================================
-# 🛡️ SANCIONES Y MODERACIÓN
+# 🛡️ SANCIONES Y MODERACIÓN (CON UNBAN)
 # ==========================================
 
 @client.tree.command(name="ban", description="Banea a un miembro")
@@ -506,7 +527,7 @@ async def ban(interaction: discord.Interaction, miembro: discord.Member, razon: 
     await interaction.response.send_message(f"🔨 {miembro.mention} baneado.")
 
 
-@client.tree.command(name="unban", description="Desbanea a un usuario")
+@client.tree.command(name="unban", description="Desbanea a un usuario por ID o Nombre")
 async def unban(interaction: discord.Interaction, usuario_id: str, razon: str = "Sin motivo"):
     if not interaction.user.guild_permissions.ban_members: return await interaction.response.send_message("❌ Sin permisos.", ephemeral=True)
     async for entry in interaction.guild.bans():
@@ -542,8 +563,8 @@ async def unmute(interaction: discord.Interaction, miembro: discord.Member):
 @client.tree.command(name="warn", description="Advierte a un miembro")
 async def warn(interaction: discord.Interaction, miembro: discord.Member, razon: str):
     if not interaction.user.guild_permissions.moderate_members: return await interaction.response.send_message("❌ Sin permisos.", ephemeral=True)
-    base_datos_sanciones[miembro.id].append(f"⚠️️ Warn - {razon}")
-    try: await miembro.send(embed=discord.Embed(title="⚠️️ Advertencia", description=razon, color=0xF1C40F))
+    base_datos_sanciones[miembro.id].append(f"⚠ Warn - {razon}")
+    try: await miembro.send(embed=discord.Embed(title="⚠ Advertencia", description=razon, color=0xF1C40F))
     except: pass
     await interaction.response.send_message(f"⚠️ {miembro.mention} advertido.")
 
@@ -562,7 +583,7 @@ async def historial(interaction: discord.Interaction, miembro: discord.Member):
 @client.tree.command(name="help", description="Centro de ayuda")
 async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(title="✨ Centro de Ayuda", description=f"Prefijo: `{config_global['prefijo']}`", color=0x5865F2)
-    embed.add_field(name="⚙ Módulos", value="• `/configuracion` • `/confi-general` • `/variables` • `/antibots`\n• `/organizar-evento` • `/lista-eventos` • `/ticket` • `/postulacion` • `/historial`", inline=False)
+    embed.add_field(name="⚙ Módulos Completos", value="• `/configuracion` • `/confi-general` • `/variables` • `/antibots`\n• `/organizar-evento` • `/lista-eventos` • `/ticket` • `/postulacion`\n• `/ban` • `/unban` • `/historial` • `/trivia`", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
