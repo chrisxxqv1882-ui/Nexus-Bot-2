@@ -6,7 +6,7 @@ from collections import defaultdict
 import discord
 from discord import app_commands
 
-# Configuración global del bot, roles, canales, prefijo y anti-spam (con duración de timeout configurable)
+# Configuración global del bot, roles, canales, prefijo y anti-spam
 config_global = {
     "prefijo": "a¡",
     "rol_comandos_id": None,  
@@ -16,7 +16,7 @@ config_global = {
     "antispam_activo": True,
     "antispam_limite_mensajes": 5,
     "antispam_ventana_segundos": 5,
-    "antispam_timeout_segundos": 60, # Tiempo de castigo predeterminado en segundos
+    "antispam_timeout_segundos": 60,
     "embed_juegos_titulo": "🎮 Zona de Juegos e Interacción",
     "embed_juegos_desc": "¡Diviértete con los minijuegos multijugador y nuestra trivia masiva estilo Nekotrivia!",
     "embed_juegos_color": 0xF1C40F
@@ -47,80 +47,81 @@ postulaciones_config = {
     }
 }
 
+# 🧠 BANCO DE TRIVIA CON ENLACES GIF DIRECTOS Y ESTABLES
 BANCO_TRIVIA = [
     {
         "p": "¿Cómo se llama el protagonista de Dragon Ball que come sin parar?",
         "correcta": "Goku",
         "opciones": ["Vegeta", "Goku", "Piccolo", "Krillin"],
         "cat": "Anime",
-        "img": "https://media4.giphy.com/media/cb9aF9tDyiRkY/giphy.gif"
+        "img": "https://media.giphy.com/media/cb9aF9tDyiRkY/giphy.gif"
     },
     {
         "p": "¿Cuál es el nombre de la libreta mortal en Death Note?",
         "correcta": "Death Note",
         "opciones": ["Life Note", "Death Note", "Dark Book", "Shinigami Note"],
         "cat": "Anime",
-        "img": "https://media3.giphy.com/media/HjfiEczPb2y6s/giphy.gif"
+        "img": "https://media.giphy.com/media/HjfiEczPb2y6s/giphy.gif"
     },
     {
         "p": "¿En Naruto, cuál es el gran sueño de Naruto Uzumaki?",
         "correcta": "Hokage",
         "opciones": ["Kazekage", "Hokage", "Hokage Oscuro", "Sannin"],
         "cat": "Anime",
-        "img": "https://media1.giphy.com/media/Kzb1zItSqUf0g/giphy.gif"
+        "img": "https://media.giphy.com/media/Kzb1zItSqUf0g/giphy.gif"
     },
     {
         "p": "¿Cómo se llama el titán principal de Eren Jaeger en Shingeki no Kyojin?",
         "correcta": "Titán de Ataque",
         "opciones": ["Titán Colosal", "Titán Blindado", "Titán de Ataque", "Titán Bestia"],
         "cat": "Anime",
-        "img": "https://media2.giphy.com/media/v0ok8uhZvw3yE/giphy.gif"
+        "img": "https://media.giphy.com/media/v0ok8uhZvw3yE/giphy.gif"
     },
     {
         "p": "¿Qué fruta del diablo consume Monkey D. Luffy en One Piece?",
         "correcta": "Gomu Gomu",
         "opciones": ["Mera Mera", "Gomu Gomu", "Ope Ope", "Hito Hito"],
         "cat": "Anime",
-        "img": "https://media3.giphy.com/media/9BuHO7tE98McE/giphy.gif"
+        "img": "https://media.giphy.com/media/9BuHO7tE98McE/giphy.gif"
     },
     {
         "p": "¿Cómo se llama el cazador de demonios con cabello burdeos en Kimetsu no Yaiba?",
         "correcta": "Tanjiro",
         "opciones": ["Inosuke", "Zenitsu", "Tanjiro", "Muzan"],
         "cat": "Anime",
-        "img": "https://media1.giphy.com/media/tEXUOC8zScfbhz0VDg/giphy.gif"
+        "img": "https://media.giphy.com/media/tEXUOC8zScfbhz0VDg/giphy.gif"
     },
     {
         "p": "¿Qué civilización construyó la majestuosa ciudad de Machu Picchu?",
         "correcta": "Inca",
         "opciones": ["Maya", "Azteca", "Inca", "Romana"],
         "cat": "Historia",
-        "img": "https://media3.giphy.com/media/3o7TKSjRrfIPjeiDiM/giphy.gif"
+        "img": "https://media.giphy.com/media/3o7TKSjRrfIPjeiDiM/giphy.gif"
     },
     {
         "p": "¿En qué año dio inicio oficialmente la Primera Guerra Mundial?",
         "correcta": "1914",
         "opciones": ["1914", "1939", "1812", "1905"],
         "cat": "Historia",
-        "img": "https://media2.giphy.com/media/l0HlRnAWXxn0MhOBK/giphy.gif"
+        "img": "https://media.giphy.com/media/l0HlRnAWXxn0MhOBK/giphy.gif"
     },
     {
         "p": "¿Quién fue el primer presidente en la historia de los Estados Unidos?",
         "correcta": "George Washington",
         "opciones": ["Abraham Lincoln", "George Washington", "Thomas Jefferson", "John Adams"],
         "cat": "Historia",
-        "img": "https://media3.giphy.com/media/l4FGpPki5v2Bcd6Ss/giphy.gif"
+        "img": "https://media.giphy.com/media/l4FGpPki5v2Bcd6Ss/giphy.gif"
     }
 ]
 
-for i in range(200):
+for i in range(150):
     if i % 2 == 0:
         BANCO_TRIVIA.append({
             "p": "Cultura Otaku: ¿Este personaje o serie es sumamente popular globalmente?",
             "correcta": "Sí",
             "opciones": ["Sí", "No", "Tal vez", "Falso"],
             "cat": "Anime",
-            "img": "https://media4.giphy.com/media/cb9aF9tDyiRkY/giphy.gif"
+            "img": "https://media.giphy.com/media/cb9aF9tDyiRkY/giphy.gif"
         })
     else:
         BANCO_TRIVIA.append({
@@ -128,7 +129,7 @@ for i in range(200):
             "correcta": "Sí",
             "opciones": ["Sí", "No", "Fue menor", "Ficción"],
             "cat": "Historia",
-            "img": "https://media3.giphy.com/media/3o7TKSjRrfIPjeiDiM/giphy.gif"
+            "img": "https://media.giphy.com/media/3o7TKSjRrfIPjeiDiM/giphy.gif"
         })
 
 
@@ -165,11 +166,10 @@ async def on_message(message):
         if len(registro_antispam[autor_id]) > config_global["antispam_limite_mensajes"]:
             try:
                 await message.delete()
-                # Aplicar Timeout (Silenciamiento) al usuario
                 duracion_timeout = config_global["antispam_timeout_segundos"]
                 await message.author.timeout(discord.utils.utcnow() + discord.Timedelta(seconds=duracion_timeout), reason="Anti-spam automático")
                 
-                warning = await message.channel.send(f"⚠️ {message.author.mention} ha recibido un **Timeout de {duracion_timeout} segundos** por exceder el límite de mensajes (Spam).")
+                warning = await message.channel.send(f"⚠️ {message.author.mention} ha recibido un **Timeout de {duracion_timeout} segundos** por spam.")
                 await asyncio.sleep(5)
                 await warning.delete()
             except Exception as e:
@@ -191,8 +191,8 @@ async def on_message(message):
         if client.user.avatar:
             embed.set_thumbnail(url=client.user.avatar.url)
 
-        embed.add_field(name="🛠️ Configuración", value=f"• `/configuracion` ➜ Menú para roles, canal de respuestas, anti-spam y panel de formularios.", inline=False)
-        embed.add_field(name="📋 Postulaciones", value="• `/postulacion` ➜ Menú desplegable para iniciar postulaciones públicas.", inline=False)
+        embed.add_field(name="🛠️ Configuración", value=f"• `/configuracion` ➜ Menú privado para roles, canal, anti-spam y formularios.", inline=False)
+        embed.add_field(name="📋 Postulaciones", value=f"• `/postulacion` ➜ Menú privado para iniciar postulaciones públicas.", inline=False)
         embed.add_field(name="🎯 Zona de Juegos", value="• `/juegos` • `/trivia` • `/ppt` • `/dado`", inline=False)
         embed.set_footer(text=f"Solicitado por {message.author.display_name}", icon_url=message.author.display_avatar.url)
         await message.channel.send(embed=embed)
@@ -264,7 +264,7 @@ class ModalConfigSistema(discord.ui.Modal, title="Configuración General y Anti-
             config_global["antispam_limite_mensajes"] = int(self.antispam_msj.value.strip())
             config_global["antispam_timeout_segundos"] = int(self.antispam_time.value.strip())
 
-            await interaction.response.send_message("✅ ¡Configuración general y parámetros de timeout guardados con éxito!", ephemeral=True)
+            await interaction.response.send_message("✅ ¡Configuración general guardada con éxito!", ephemeral=True)
         except ValueError:
             await interaction.response.send_message("❌ Error: Asegúrate de ingresar valores numéricos válidos.", ephemeral=True)
 
@@ -273,7 +273,7 @@ class ModalConfigSistema(discord.ui.Modal, title="Configuración General y Anti-
 
 class VistaBotonesFormularios(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None)
+        super().__init__(timeout=60)
 
     @discord.ui.button(label="📝 Staff", style=discord.ButtonStyle.primary, row=0)
     async def btn_staff(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -296,13 +296,13 @@ class VistaBotonesFormularios(discord.ui.View):
         await interaction.response.send_modal(ModalConfigFormulario("nexus", "Programación (Nexus)"))
 
 
-# --- MENÚ DESPLEGABLE PRINCIPAL DE CONFIGURACIÓN ---
+# --- MENÚ DESPLEGABLE DE CONFIGURACIÓN (PRIVADO) ---
 
 class SelectorConfiguracion(discord.ui.Select):
     def __init__(self):
         options = [
-            discord.SelectOption(label="Prefijo, Roles, Canal de Respuestas y Anti-Spam", description="Ajusta seguridad, canal y tiempo de timeout", emoji="⚙️", value="sistema"),
-            discord.SelectOption(label="Configurar Formularios (Staff, Ally, Redes, Nexus)", description="Abre el panel con botones para editar preguntas", emoji="📝", value="formularios")
+            discord.SelectOption(label="Prefijo, Roles, Canal y Anti-Spam", description="Ajusta seguridad, canal y timeout", emoji="⚙️", value="sistema"),
+            discord.SelectOption(label="Configurar Formularios (Staff, Ally, Redes, Nexus)", description="Abre panel con botones para editar preguntas", emoji="📝", value="formularios")
         ]
         super().__init__(placeholder="Elige una sección de configuración...", min_values=1, max_values=1, options=options)
 
@@ -316,19 +316,19 @@ class SelectorConfiguracion(discord.ui.Select):
         elif val == "formularios":
             embed_forms = discord.Embed(
                 title="📝 Panel de Configuración de Formularios",
-                description="Haz clic en cualquiera de los botones inferiores para editar los títulos, colores y preguntas de cada formulario:",
+                description="Haz clic en los botones inferiores para editar los títulos, colores y preguntas:",
                 color=0x2ECC71
             )
-            await interaction.response.send_message(embed=embed_forms, view=VistaBotonesFormularios(), ephemeral=True)
+            await interaction.response.edit_message(embed=embed_forms, view=VistaBotonesFormularios())
 
 
 class VistaMenuConfiguracion(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None)
+        super().__init__(timeout=60)
         self.add_item(SelectorConfiguracion())
 
 
-# --- FLUJO DE POSTULACIONES (100% PÚBLICAS) ---
+# --- FLUJO DE POSTULACIONES ---
 
 class VistaComenzarPostulacion(discord.ui.View):
     def __init__(self, tipo: str, num_id: int, preguntas: list, miembro_postulado: discord.Member, config_form: dict):
@@ -469,8 +469,9 @@ class SelectorPostulaciones(discord.ui.Select):
         )
         embed.set_thumbnail(url=self.miembro.display_avatar.url)
 
+        # Se envía al canal público el embed final de postulación
         await interaction.channel.send(content=f"📋 Panel de postulación creado para {self.miembro.mention}:", embed=embed, view=VistaComenzarPostulacion(tipo, num_id, preguntas, self.miembro, config_form))
-        await interaction.response.send_message("✅ Panel de postulación enviado al canal público.", ephemeral=True)
+        await interaction.response.edit_message(content="✅ ¡Panel de postulación generado con éxito en el canal!", embed=None, view=None)
 
 
 class VistaMenuPostulacion(discord.ui.View):
@@ -490,8 +491,8 @@ async def postulacion(interaction: discord.Interaction, miembro: discord.Member)
         description=f"Selecciona en el menú desplegable de abajo el tipo de formulario que deseas abrir para **{miembro.display_name}**:",
         color=0x3498DB
     )
-    await interaction.channel.send(embed=embed, view=VistaMenuPostulacion(miembro))
-    await interaction.response.send_message("✅ Menú de postulación generado.", ephemeral=True)
+    # PRIVADO (ephemeral=True) para que solo el admin/staff vea el menú de selección
+    await interaction.response.send_message(embed=embed, view=VistaMenuPostulacion(miembro), ephemeral=True)
 
 
 @client.tree.command(name="configuracion", description="Panel de configuración general con menú desplegable")
@@ -511,8 +512,8 @@ async def configuracion(interaction: discord.Interaction):
     embed.add_field(name="🛡️ Seguridad y Roles", value=f"• **Ejecutar Postulaciones:** {r_cmd.mention if isinstance(r_cmd, discord.Role) else r_cmd}\n• **Revisar / Staff:** {r_atc.mention if isinstance(r_atc, discord.Role) else r_atc}", inline=False)
     embed.add_field(name="📢 Canales", value=f"• **Canal Público de Respuestas:** {c_log.mention if isinstance(c_log, discord.TextChannel) else c_log}", inline=False)
 
-    await interaction.channel.send(embed=embed, view=VistaMenuConfiguracion())
-    await interaction.response.send_message("✅ Panel de configuración abierto en el canal.", ephemeral=True)
+    # PRIVADO (ephemeral=True) para que solo el admin vea y use el panel de configuración
+    await interaction.response.send_message(embed=embed, view=VistaMenuConfiguracion(), ephemeral=True)
 
 
 # ==========================================
@@ -526,8 +527,7 @@ async def juegos(interaction: discord.Interaction):
         description=config_global["embed_juegos_desc"] + "\n\n**Comandos:**\n• `/dado` • `/ppt` • `/trivia`",
         color=config_global["embed_juegos_color"]
     )
-    await interaction.channel.send(embed=embed)
-    await interaction.response.send_message("✅ Menú de juegos enviado.", ephemeral=True)
+    await interaction.response.send_message(embed=embed)
 
 @client.tree.command(name="dado", description="Lanza un dado")
 @app_commands.describe(caras="Caras del dado")
@@ -601,7 +601,7 @@ class SelectorCategoriaTrivia(discord.ui.Select):
             discord.SelectOption(label="Anime", emoji="⛩️", value="Anime"),
             discord.SelectOption(label="Historia", emoji="🏛️", value="Historia")
         ]
-        super().__init__(placeholder="Elige categoría...", options=options)
+        super().__init__(placeholder="Elige categoría de trivia...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
         cat = self.values[0]
@@ -610,8 +610,9 @@ class SelectorCategoriaTrivia(discord.ui.Select):
         embed.set_image(url=t["img"])
         view = VistaTriviaPublica(t)
         
+        # Publicar la trivia para todos en el canal
         await interaction.channel.send(content=f"✅ Trivia de **{cat}** iniciada por {interaction.user.mention}:", embed=embed, view=view)
-        await interaction.response.send_message("✅ Trivia iniciada.", ephemeral=True)
+        await interaction.response.edit_message(content="✅ ¡Trivia iniciada en el canal!", embed=None, view=None)
 
 
 class VistaMenuTrivia(discord.ui.View):
@@ -620,9 +621,9 @@ class VistaMenuTrivia(discord.ui.View):
 
 @client.tree.command(name="trivia", description="Trivia pública con botones y GIF")
 async def trivia(interaction: discord.Interaction):
-    embed = discord.Embed(title="🧠 Selector de Trivia", description="Elige la categoría:", color=0x3498DB)
-    await interaction.channel.send(embed=embed, view=VistaMenuTrivia())
-    await interaction.response.send_message("✅ Selector de trivia enviado.", ephemeral=True)
+    embed = discord.Embed(title="🧠 Selector de Trivia", description="Elige la categoría en el menú inferior:", color=0x3498DB)
+    # PRIVADO (ephemeral=True) para que solo el que ejecutó el comando elija la categoría
+    await interaction.response.send_message(embed=embed, view=VistaMenuTrivia(), ephemeral=True)
 
 
 client.run(os.environ['DISCORD_TOKEN'])
