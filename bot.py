@@ -13,7 +13,7 @@ config_global = {
     "rol_aprobar_sugerencias_id": None, 
     "canal_sanciones_id": None, 
     "canal_sugerencias_id": None, 
-    "canal_postulaciones_id": None, # Canal global único para recibir todas las postulaciones
+    "canal_postulaciones_id": None, # Canal global para recibir postulaciones
     "contador_postulaciones": 0, 
     # Anti-Spam
     "antispam_activo": True,
@@ -23,8 +23,8 @@ config_global = {
     # Anti-Bot y Anti-Raid Avanzado
     "antibots_activo": True,
     "antiraid_activo": True,
-    "antiraid_limite_ingresos": 5, # Máximo de miembros unidos
-    "antiraid_ventana_segundos": 10, # en esta ventana de tiempo
+    "antiraid_limite_ingresos": 5,
+    "antiraid_ventana_segundos": 10,
     # Juegos
     "embed_juegos_titulo": "🎮 Zona de Juegos e Interacción",
     "embed_juegos_desc": "¡Diviértete con los minijuegos multijugador y nuestra trivia masiva estilo Nekotrivia!",
@@ -100,7 +100,7 @@ async def registrar_log_sancion(guild: discord.Guild, embed: discord.Embed):
 
 
 # ==========================================
-# 🛡️ SISTEMA AVANZADO ANTI-BOT Y ANTI-RAID
+# 🛡️️ SISTEMA AVANZADO ANTI-BOT Y ANTI-RAID
 # ==========================================
 
 @client.event
@@ -108,23 +108,20 @@ async def on_member_join(member):
     guild = member.guild
     ahora = time.time()
 
-    # 1. Sistema Anti-Raid Eficiente
     if config_global["antiraid_activo"]:
         registro_antiraid[guild.id] = [t for t in registro_antiraid[guild.id] if ahora - t < config_global["antiraid_ventana_segundos"]]
         registro_antiraid[guild.id].append(ahora)
 
         if len(registro_antiraid[guild.id]) > config_global["antiraid_limite_ingresos"]:
             try:
-                # Bloquear invitaciones temporalmente o tomar acción defensiva
                 embed_raid = discord.Embed(
                     title="🚨 ¡ALERTA ANTI-RAID ACTIVADA!",
-                    description=f"Se detectó un ingreso masivo de cuentas en **{guild.name}**. Se recomienda activar el modo lento o verificar la seguridad.",
+                    description=f"Se detectó un ingreso masivo de cuentas en **{guild.name}**.",
                     color=discord.Color.red()
                 )
                 await registrar_log_sancion(guild, embed_raid)
             except: pass
 
-    # 2. Sistema Anti-Bot Seguro
     if member.bot and config_global["antibots_activo"]:
         try:
             async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.bot_add):
@@ -344,7 +341,7 @@ async def confi_general(interaction: discord.Interaction):
 
 
 # ==========================================
-# 📋 SISTEMA DE POSTULACIONES Y /CONFIGURAR-POSTULACIONES
+# 📋 SISTEMA DE POSTULACIONES Y /CONFIGURAR-POSTULACIONES (CON BOTONES)
 # ==========================================
 
 class ModalEditarFormulario(discord.ui.Modal):
@@ -383,32 +380,38 @@ class ModalEditarFormulario(discord.ui.Modal):
         await interaction.response.send_message(f"✅ ¡Formulario **{self.post_key}** actualizado con éxito!", ephemeral=True)
 
 
-@client.tree.command(name="configurar-postulaciones", description="Edita títulos, colores y preguntas de los formularios de postulación")
+class VistaBotonesConfigurarPostulaciones(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=180)
+
+    @discord.ui.button(label="📝 Staff (Moderación)", style=discord.ButtonStyle.primary, row=0)
+    async def btn_staff(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ModalEditarFormulario("staff", postulaciones_config["staff"]))
+
+    @discord.ui.button(label="🤝 Casa Alianza", style=discord.ButtonStyle.success, row=0)
+    async def btn_ally(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ModalEditarFormulario("ally", postulaciones_config["ally"]))
+
+    @discord.ui.button(label="🎨 Cuerpo de Redes", style=discord.ButtonStyle.secondary, row=1)
+    async def btn_redes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ModalEditarFormulario("redes", postulaciones_config["redes"]))
+
+    @discord.ui.button(label="💻 Cuerpo de Programación", style=discord.ButtonStyle.danger, row=1)
+    async def btn_nexus(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ModalEditarFormulario("nexus", postulaciones_config["nexus"]))
+
+
+@client.tree.command(name="configurar-postulaciones", description="Edita títulos, colores y preguntas mediante botones directos")
 async def configurar_postulaciones(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
 
-    v = discord.ui.View(timeout=60)
-    s = discord.ui.Select(
-        placeholder="Selecciona el formulario a editar...",
-        options=[
-            discord.SelectOption(label="Staff (Moderación)", value="staff", emoji="📝"),
-            discord.SelectOption(label="Casa Alianza", value="ally", emoji="🤝"),
-            discord.SelectOption(label="Cuerpo de Redes", value="redes", emoji="🎨"),
-            discord.SelectOption(label="Cuerpo de Programación", value="nexus", emoji="💻")
-        ]
+    embed = discord.Embed(
+        title="⚙️ Configurar Formularios de Postulación",
+        description="Haz clic en el botón correspondiente al formulario que deseas editar en tiempo real:",
+        color=0x3498DB
     )
-
-    async def cb(i):
-        tipo_sel = s.values[0]
-        cfg = postulaciones_config.get(tipo_sel, {})
-        await i.response.send_modal(ModalEditarFormulario(tipo_sel, cfg))
-
-    s.callback = cb
-    v.add_item(s)
-
-    embed = discord.Embed(title="⚙️ Configurar Formularios", description="Selecciona en el menú desplegable qué formulario deseas editar en tiempo real:", color=0x3498DB)
-    await interaction.response.send_message(embed=embed, view=v, ephemeral=True)
+    await interaction.response.send_message(embed=embed, view=VistaBotonesConfigurarPostulaciones(), ephemeral=True)
 
 
 class VistaComenzarPostulacion(discord.ui.View):
@@ -436,7 +439,6 @@ class VistaComenzarPostulacion(discord.ui.View):
                 color=self.config_form['color']
             )
             
-            # Enviar al canal global configurado o al canal actual como respaldo
             canal_id = config_global["canal_postulaciones_id"]
             destino = interaction.guild.get_channel(canal_id) if canal_id else interaction.channel
             if destino: 
@@ -481,6 +483,92 @@ async def postulacion(interaction: discord.Interaction, miembro: discord.Member)
     s.callback = cb
     v.add_item(s)
     await interaction.response.send_message(embed=discord.Embed(title="📋 Menú de Postulaciones", description=f"Selecciona el formulario para {miembro.mention}:"), view=v, ephemeral=True)
+
+
+# ==========================================
+# 🛡️ SANCIONES Y MODERACIÓN (BAN, UNBAN, KICK, MUTE, WARN, HISTORIAL)
+# ==========================================
+
+@client.tree.command(name="ban", description="Banea a un miembro del servidor")
+async def ban(interaction: discord.Interaction, miembro: discord.Member, razon: str = "Sin motivo"):
+    if not interaction.user.guild_permissions.ban_members: 
+        return await interaction.response.send_message("❌ No tienes permisos para banear miembros.", ephemeral=True)
+    await miembro.ban(reason=razon)
+    base_datos_sanciones[miembro.id].append(f"🔨 Ban - {razon}")
+    
+    embed_log = discord.Embed(title="🔨 Sanción: Ban", description=f"**Usuario:** {miembro.mention}\n**Moderador:** {interaction.user.mention}\n**Razón:** {razon}", color=discord.Color.red())
+    await registrar_log_sancion(interaction.guild, embed_log)
+    await interaction.response.send_message(f"🔨 {miembro.mention} ha sido baneado.")
+
+
+@client.tree.command(name="unban", description="Desbanea a un usuario por su ID o Nombre")
+async def unban(interaction: discord.Interaction, usuario_id: str, razon: str = "Sin motivo"):
+    if not interaction.user.guild_permissions.ban_members: 
+        return await interaction.response.send_message("❌ No tienes permisos para desbanear.", ephemeral=True)
+    async for entry in interaction.guild.bans():
+        if str(entry.user.id) == usuario_id.strip() or entry.user.name.lower() == usuario_id.strip().lower():
+            await interaction.guild.unban(entry.user, reason=razon)
+            return await interaction.response.send_message(f"🔓 Usuario **{entry.user}** desbaneado correctamente.")
+    await interaction.response.send_message("❌ No se encontró ningún usuario baneado con ese ID o nombre.", ephemeral=True)
+
+
+@client.tree.command(name="kick", description="Expulsa a un miembro del servidor")
+async def kick(interaction: discord.Interaction, miembro: discord.Member, razon: str = "Sin motivo"):
+    if not interaction.user.guild_permissions.kick_members: 
+        return await interaction.response.send_message("❌ No tienes permisos para expulsar miembros.", ephemeral=True)
+    await miembro.kick(reason=razon)
+    base_datos_sanciones[miembro.id].append(f"👢 Kick - {razon}")
+    
+    embed_log = discord.Embed(title="👢 Sanción: Kick", description=f"**Usuario:** {miembro.mention}\n**Moderador:** {interaction.user.mention}\n**Razón:** {razon}", color=discord.Color.orange())
+    await registrar_log_sancion(interaction.guild, embed_log)
+    await interaction.response.send_message(f"👢 {miembro.mention} ha sido expulsado.")
+
+
+@client.tree.command(name="mute", description="Silencia temporalmente a un miembro (Timeout)")
+async def mute(interaction: discord.Interaction, miembro: discord.Member, segundos: int, razon: str = "Sin motivo"):
+    if not interaction.user.guild_permissions.moderate_members: 
+        return await interaction.response.send_message("❌ No tienes permisos para silenciar miembros.", ephemeral=True)
+    await miembro.timeout(discord.utils.utcnow() + discord.Timedelta(seconds=segundos), reason=razon)
+    base_datos_sanciones[miembro.id].append(f"🔇 Mute ({segundos}s) - {razon}")
+    
+    embed_log = discord.Embed(title="🔇 Sanción: Timeout (Mute)", description=f"**Usuario:** {miembro.mention}\n**Duración:** {segundos}s\n**Moderador:** {interaction.user.mention}\n**Razón:** {razon}", color=discord.Color.gold())
+    await registrar_log_sancion(interaction.guild, embed_log)
+    await interaction.response.send_message(f"🔇 {miembro.mention} ha sido silenciado por {segundos} segundos.")
+
+
+@client.tree.command(name="unmute", description="Quita el silencio a un miembro")
+async def unmute(interaction: discord.Interaction, miembro: discord.Member):
+    if not interaction.user.guild_permissions.moderate_members: 
+        return await interaction.response.send_message("❌ No tienes permisos.", ephemeral=True)
+    await miembro.timeout(None)
+    await interaction.response.send_message(f"🔊 Se ha retirado el silencio a {miembro.mention}.")
+
+
+@client.tree.command(name="warn", description="Advierte formalmente a un miembro")
+async def warn(interaction: discord.Interaction, miembro: discord.Member, razon: str):
+    if not interaction.user.guild_permissions.moderate_members: 
+        return await interaction.response.send_message("❌ No tienes permisos para advertir miembros.", ephemeral=True)
+    base_datos_sanciones[miembro.id].append(f"⚠️ Warn - {razon}")
+    
+    try: 
+        await miembro.send(embed=discord.Embed(title="⚠️ Advertencia", description=f"Has recibido una advertencia en **{interaction.guild.name}**.\n**Razón:** {razon}", color=discord.Color.gold()))
+    except: pass
+    
+    embed_log = discord.Embed(title="⚠️ Sanción: Warn", description=f"**Usuario:** {miembro.mention}\n**Moderador:** {interaction.user.mention}\n**Razón:** {razon}", color=discord.Color.gold())
+    await registrar_log_sancion(interaction.guild, embed_log)
+    await interaction.response.send_message(f"⚠️ {miembro.mention} ha sido advertido.")
+
+
+@client.tree.command(name="historial", description="Muestra el historial de sanciones de un miembro")
+async def historial(interaction: discord.Interaction, miembro: discord.Member):
+    if not interaction.user.guild_permissions.moderate_members: 
+        return await interaction.response.send_message("❌ No tienes permisos.", ephemeral=True)
+    s = base_datos_sanciones.get(miembro.id, [])
+    if not s: 
+        return await interaction.response.send_message(f"🛡️ El usuario {miembro.mention} tiene el historial limpio.", ephemeral=True)
+    
+    embed = discord.Embed(title=f"📜 Historial de Sanciones: {miembro.display_name}", description="\n".join([f"• {x}" for x in s]), color=discord.Color.red())
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 # ==========================================
@@ -662,7 +750,7 @@ async def lista_eventos(interaction: discord.Interaction):
 @client.tree.command(name="help", description="Centro de ayuda")
 async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(title="✨ Centro de Ayuda", description=f"Prefijo: `{config_global['prefijo']}`", color=0x5865F2)
-    embed.add_field(name="⚙ Módulos Activos", value="• `/confi-general` • `/configurar-postulaciones` • `/postulacion`\n• `/organizar-evento` • `/iniciar-evento` • `/lista-eventos`\n• `/juegos` • `/dado` • `/trivia`", inline=False)
+    embed.add_field(name="⚙ Módulos Activos", value="• `/confi-general` • `/configurar-postulaciones` • `/postulacion`\n• `/organizar-evento` • `/iniciar-evento` • `/lista-eventos`\n• `/ban` • `/kick` • `/mute` • `/warn` • `/historial`\n• `/juegos` • `/dado` • `/trivia`", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
