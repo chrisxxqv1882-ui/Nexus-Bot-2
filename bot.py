@@ -36,27 +36,38 @@ registro_antiraid = defaultdict(list)
 base_datos_sanciones = defaultdict(list)
 eventos_activos = {} 
 
-# CONFIGURACIÓN DE POSTULACIONES (TOTALMENTE EDITABLES)
+# CONFIGURACIÓN EXCLUSIVA DE POSTULACIONES (STAFF Y ALLY)
 postulaciones_config = {
     "staff": {
-        "titulo": "📝 Postulación: Cuerpo de Moderación",
+        "titulo": "🛡️ POSTULACIÓN STAFF — HAKKUZE",
         "color": 0x3498DB,
-        "preguntas": ["¿Cuál es tu edad?", "¿Por qué quieres ser Moderador?", "¿Tienes experiencia previa moderando servidores?"]
+        "preguntas": [
+            "1. Nombre / Apodo:",
+            "2. Edad:",
+            "3. País / Zona horaria:",
+            "4. ¿Cuánto tiempo llevas en Hakkuze?",
+            "5. ¿Has sido Staff anteriormente? (Sí / No y breve experiencia)",
+            "6. ¿Qué experiencia tienes moderando servidores de Discord?",
+            "7. ¿Qué bots o herramientas de Discord sabes utilizar?",
+            "8. Un usuario está incumpliendo las normas constantemente. ¿Qué harías?",
+            "9. Un amigo tuyo rompe una regla. ¿Lo sancionarías? ¿Por qué?",
+            "10. ¿Qué harías si ves a otro Staff abusando de sus permisos?",
+            "11. ¿Por qué quieres ser Staff de Hakkuze?",
+            "12. ¿Qué podrías aportar al servidor?",
+            "13. ¿Qué área te interesa? (Moderación / Soporte / Eventos / Alianzas / Otra)",
+            "14. ¿Cuánto tiempo podrías dedicar diariamente al servidor?",
+            "15. ¿Por qué deberíamos elegirte?"
+        ]
     },
     "ally": {
-        "titulo": "📝 Postulación: Casa Alianza",
+        "titulo": "🤝 POSTULACIÓN CASA ALIANZA — HAKKUZE",
         "color": 0x2ECC71,
-        "preguntas": ["¿Cuál es el nombre y temática de tu servidor?", "¿Cuántos miembros activos tienes?", "¿Cuál es el link de invitación permanente?"]
-    },
-    "redes": {
-        "titulo": "📝 Postulación: Cuerpo de Redes",
-        "color": 0x9B59B6,
-        "preguntas": ["¿Qué plataformas manejas (TikTok, Instagram, Twitter)?", "¿Tienes ejemplos de ediciones, videos o publicaciones previas?"]
-    },
-    "nexus": {
-        "titulo": "📝 Postulación: Cuerpo de Programación",
-        "color": 0xE74C3C,
-        "preguntas": ["¿Qué lenguajes de programación conoces (Python, JavaScript, etc.)?", "¿Cuánto tiempo llevas programando bots o sistemas?"]
+        "preguntas": [
+            "1. Nombre / Apodo:",
+            "2. ¿Cuál es el nombre y temática de tu servidor?",
+            "3. ¿Cuántos miembros activos tienes?",
+            "4. ¿Cuál es el link de invitación permanente de tu servidor?"
+        ]
     }
 }
 
@@ -100,7 +111,7 @@ async def registrar_log_sancion(guild: discord.Guild, embed: discord.Embed):
 
 
 # ==========================================
-# 🛡️️ SISTEMA AVANZADO ANTI-BOT Y ANTI-RAID
+# 🛡 SISTEMA AVANZADO ANTI-BOT Y ANTI-RAID
 # ==========================================
 
 @client.event
@@ -341,7 +352,7 @@ async def confi_general(interaction: discord.Interaction):
 
 
 # ==========================================
-# 📋 SISTEMA DE POSTULACIONES SEGURO Y CON BOTONES APROBAR/RECHAZAR
+# 📋 SISTEMA DE POSTULACIONES (STAFF Y ALLY)
 # ==========================================
 
 class ModalEditarFormulario(discord.ui.Modal):
@@ -356,7 +367,7 @@ class ModalEditarFormulario(discord.ui.Modal):
             label="Preguntas (Una por línea)",
             style=discord.TextStyle.paragraph,
             default="\n".join(cfg["preguntas"]),
-            max_length=2000
+            max_length=4000
         )
 
         self.add_item(self.titulo_input)
@@ -377,38 +388,30 @@ class ModalEditarFormulario(discord.ui.Modal):
         postulaciones_config[self.post_key]["color"] = nuevo_color
         postulaciones_config[self.post_key]["preguntas"] = nuevas_preguntas
 
-        await interaction.response.send_message(f"✅ ¡Formulario **{self.post_key}** actualizado con éxito!", ephemeral=True)
+        await interaction.response.send_message(f"✅ ¡Formulario **{self.post_key.upper()}** actualizado con éxito!", ephemeral=True)
 
 
 class VistaBotonesConfigurarPostulaciones(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=180)
 
-    @discord.ui.button(label="📝 Staff", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="🛡️ Postulación Staff", style=discord.ButtonStyle.primary, row=0)
     async def btn_staff(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ModalEditarFormulario("staff", postulaciones_config["staff"]))
 
-    @discord.ui.button(label="🤝 Alianza", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label="🤝 Postulación Alianza", style=discord.ButtonStyle.success, row=0)
     async def btn_ally(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ModalEditarFormulario("ally", postulaciones_config["ally"]))
 
-    @discord.ui.button(label="🎨 Redes", style=discord.ButtonStyle.secondary, row=1)
-    async def btn_redes(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ModalEditarFormulario("redes", postulaciones_config["redes"]))
 
-    @discord.ui.button(label="💻 Programación", style=discord.ButtonStyle.danger, row=1)
-    async def btn_nexus(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ModalEditarFormulario("nexus", postulaciones_config["nexus"]))
-
-
-@client.tree.command(name="configurar-postulaciones", description="Edita títulos, colores y preguntas mediante botones directos")
+@client.tree.command(name="configurar-postulaciones", description="Edita los formularios de Staff o Alianza en tiempo real")
 async def configurar_postulaciones(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
 
     embed = discord.Embed(
         title="⚙️ Configurar Formularios de Postulación",
-        description="Haz clic en el botón correspondiente al formulario que deseas editar en tiempo real:",
+        description="Haz clic en el botón correspondiente al formulario que deseas editar:",
         color=0x3498DB
     )
     await interaction.response.send_message(embed=embed, view=VistaBotonesConfigurarPostulaciones(), ephemeral=True)
@@ -428,7 +431,7 @@ class VistaVeredictoPostulacion(discord.ui.View):
         for child in self.children: child.disabled = True
         embed = interaction.message.embeds[0]
         embed.color = discord.Color.green()
-        embed.add_field(name="📌 Resultado", value=f"✅ **Aprobada** por {interaction.user.mention}", inline=False)
+        embed.add_field(name="📌 Veredicto del Staff", value=f"✅ **APROBADA** por {interaction.user.mention}", inline=False)
         await interaction.message.edit(embed=embed, view=self)
 
         try:
@@ -436,13 +439,13 @@ class VistaVeredictoPostulacion(discord.ui.View):
             if candidato:
                 embed_md = discord.Embed(
                     title="🎉 ¡Postulación Aprobada!",
-                    description=f"¡Felicidades! Tu postulación para **{self.titulo_form}** en **{interaction.guild.name}** ha sido **APROBADA**.",
+                    description=f"¡Muchas felicidades! Tu postulación para **{self.titulo_form}** en **{interaction.guild.name}** ha sido **APROBADA** con éxito. ¡Bienvenido/a al equipo!",
                     color=discord.Color.green()
                 )
                 await candidato.send(embed=embed_md)
         except: pass
 
-        await interaction.response.send_message("✅ Postulación aprobada correctamente.", ephemeral=True)
+        await interaction.response.send_message("✅ Postulación aprobada y notificada al candidato.", ephemeral=True)
 
     @discord.ui.button(label="❌ Rechazar", style=discord.ButtonStyle.danger, custom_id="btn_rechazar_post")
     async def rechazar(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -452,21 +455,21 @@ class VistaVeredictoPostulacion(discord.ui.View):
         for child in self.children: child.disabled = True
         embed = interaction.message.embeds[0]
         embed.color = discord.Color.red()
-        embed.add_field(name="📌 Resultado", value=f"❌ **Rechazada** por {interaction.user.mention}", inline=False)
+        embed.add_field(name="📌 Veredicto del Staff", value=f"❌ **RECHAZADA** por {interaction.user.mention}", inline=False)
         await interaction.message.edit(embed=embed, view=self)
 
         try:
             candidato = interaction.guild.get_member(self.candidato_id)
             if candidato:
                 embed_md = discord.Embed(
-                    title="❌ Postulación No Aprobada",
-                    description=f"Lamentamos informarte que tu postulación para **{self.titulo_form}** en **{interaction.guild.name}** no ha sido aceptada en esta ocasión.",
+                    title="❌ Resultado de Postulación",
+                    description=f"Lamentamos informarte que tu postulación para **{self.titulo_form}** en **{interaction.guild.name}** no ha sido aceptada en esta ocasión. ¡Gracias por tu interés!",
                     color=discord.Color.red()
                 )
                 await candidato.send(embed=embed_md)
         except: pass
 
-        await interaction.response.send_message("❌ Postulación rechazada.", ephemeral=True)
+        await interaction.response.send_message("❌ Postulación rechazada y notificada al candidato.", ephemeral=True)
 
 
 class VistaComenzarPostulacion(discord.ui.View):
@@ -476,7 +479,7 @@ class VistaComenzarPostulacion(discord.ui.View):
 
     @discord.ui.button(label="🚀 Comenzar Postulación", style=discord.ButtonStyle.success)
     async def comenzar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # CANDADO SEGURO: Solo el candidato mencionado puede iniciar el form
+        # CANDADO SEGURO ESTRICTO
         if interaction.user.id != self.miembro_postulado.id:
             return await interaction.response.send_message("🔒 **Candado Seguro:** Este formulario es exclusivo para el usuario mencionado y no puedes iniciarlo.", ephemeral=True)
         
@@ -489,11 +492,15 @@ class VistaComenzarPostulacion(discord.ui.View):
                 respuestas.append((preg, msg.content))
             
             txt = "".join([f"**{p}**\n↳ {r}\n\n" for p, r in respuestas])
+            
             embed_final = discord.Embed(
                 title=f"{self.config_form['titulo']} (#{self.num_id})", 
                 description=f"👤 **Candidato:** {self.miembro_postulado.mention} (`{self.miembro_postulado.id}`)\n\n{txt}", 
                 color=self.config_form['color']
             )
+            # Agregar el avatar del candidato como foto pequeña (thumbnail)
+            if self.miembro_postulado.display_avatar:
+                embed_final.set_thumbnail(url=self.miembro_postulado.display_avatar.url)
             
             canal_id = config_global["canal_postulaciones_id"]
             destino = interaction.guild.get_channel(canal_id) if canal_id else interaction.channel
@@ -507,7 +514,7 @@ class VistaComenzarPostulacion(discord.ui.View):
             except: pass
 
 
-@client.tree.command(name="postulacion", description="Envía el panel de postulación para un usuario")
+@client.tree.command(name="postulacion", description="Envía el panel de postulación (Staff o Ally) para un usuario")
 async def postulacion(interaction: discord.Interaction, miembro: discord.Member):
     if not interaction.user.guild_permissions.administrator and not interaction.user.guild_permissions.manage_guild:
         return await interaction.response.send_message("❌ No tienes permisos para gestionar postulaciones.", ephemeral=True)
@@ -516,10 +523,8 @@ async def postulacion(interaction: discord.Interaction, miembro: discord.Member)
     s = discord.ui.Select(
         placeholder="Selecciona el formulario...", 
         options=[
-            discord.SelectOption(label="Staff (Moderación)", value="staff", emoji="📝"),
-            discord.SelectOption(label="Casa Alianza", value="ally", emoji="🤝"),
-            discord.SelectOption(label="Cuerpo de Redes", value="redes", emoji="🎨"),
-            discord.SelectOption(label="Cuerpo de Programación", value="nexus", emoji="💻")
+            discord.SelectOption(label="🛡️ Postulación Staff", value="staff", emoji="📝"),
+            discord.SelectOption(label="🤝 Postulación Alianza", value="ally", emoji="🤝")
         ]
     )
     
@@ -534,6 +539,9 @@ async def postulacion(interaction: discord.Interaction, miembro: discord.Member)
             description=f"Candidato: {miembro.mention}\nHaz clic en el botón inferior para responder las preguntas en tus **Mensajes Privados (MD)**.",
             color=cfg['color']
         )
+        if miembro.display_avatar:
+            embed_panel.set_thumbnail(url=miembro.display_avatar.url)
+
         await i.response.edit_message(content=f"✅ Formulario listo para {miembro.mention}.", embed=embed_panel, view=VistaComenzarPostulacion(tipo_sel, num_id, cfg["preguntas"], miembro, cfg))
 
     s.callback = cb
@@ -610,7 +618,7 @@ async def warn(interaction: discord.Interaction, miembro: discord.Member, razon:
         await miembro.send(embed=discord.Embed(title="⚠️ Advertencia", description=f"Has recibido una advertencia en **{interaction.guild.name}**.\n**Razón:** {razon}", color=discord.Color.gold()))
     except: pass
     
-    embed_log = discord.Embed(title="⚠️ Sanción: Warn", description=f"**Usuario:** {miembro.mention}\n**Moderador:** {interaction.user.mention}\n**Razón:** {razon}", color=discord.Color.gold())
+    embed_log = discord.Embed(title="⚠️️ Sanción: Warn", description=f"**Usuario:** {miembro.mention}\n**Moderador:** {interaction.user.mention}\n**Razón:** {razon}", color=discord.Color.gold())
     await registrar_log_sancion(interaction.guild, embed_log)
     await interaction.response.send_message(f"⚠️ {miembro.mention} ha sido advertido.")
 
@@ -751,7 +759,7 @@ class SelectorIniciarEvento(discord.ui.Select):
                         color=discord.Color.gold()
                     )
                     await canal.send(content=ping, embed=embed_inicio)
-                    await i2.response.send_message(f"✅ ¡Anuncio enviado a {canal.mention}!", ephemeral=True)
+                    await i2.response.send_message(f"✅ ¡Anuncio enviado en {canal.mention}!", ephemeral=True)
 
         await interaction.response.send_modal(ModalInicioPing())
 
