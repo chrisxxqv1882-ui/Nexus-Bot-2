@@ -12,6 +12,7 @@ config_global = {
     "rol_comandos_id": None,  
     "rol_atencion_id": None,   
     "canal_logs_id": None,     
+    "canal_sanciones_id": None, # Nuevo: Canal donde se registran los logs de baneos, mutes, kicks, warns
     "canal_tickets_id": None,  
     "contador_postulaciones": 0, 
     "antispam_activo": True,
@@ -25,7 +26,7 @@ config_global = {
     "ticket_color": 0x5865F2,
     "ticket_boton_texto": "🎫 Abrir Ticket",
     "ticket_bienvenida": "🎫 **Ticket de Soporte**\nHola {usuario}, el staff te atenderá pronto. Explica tu duda detalladamente.",
-    "ticket_tipo_menu": "botones", # "botones" o "menu"
+    "ticket_tipo_menu": "botones", 
     "embed_juegos_titulo": "🎮 Zona de Juegos e Interacción",
     "embed_juegos_desc": "¡Diviértete con los minijuegos multijugador y nuestra trivia masiva estilo Nekotrivia!",
     "embed_juegos_color": 0xF1C40F
@@ -161,6 +162,18 @@ async def on_ready():
     print(f'¡Bot conectado con éxito como {client.user}!')
 
 
+# --- FUNCIÓN AUXILIAR PARA ENVIAR LOGS DE SANCIONES ---
+async def registrar_log_sancion(guild: discord.Guild, embed: discord.Embed):
+    canal_id = config_global["canal_sanciones_id"]
+    if canal_id:
+        canal = guild.get_channel(canal_id)
+        if canal:
+            try:
+                await canal.send(embed=embed)
+            except:
+                pass
+
+
 # --- SISTEMA ANTI-BOTS AUTOMÁTICO ---
 @client.event
 async def on_member_join(member):
@@ -172,6 +185,13 @@ async def on_member_join(member):
                     await member.guild.ban(member, reason="Anti-Bots: Bot no autorizado")
                     if invitador and not invitador.guild_permissions.administrator:
                         await member.guild.ban(invitador, reason="Anti-Bots: Invitó un bot no autorizado")
+                    
+                    embed_log = discord.Embed(
+                        title="🤖 Anti-Bots Activado",
+                        description=f"Bot no autorizado {member.mention} fue baneado.\nInvitador: {invitador.mention if invitador else 'Desconocido'}",
+                        color=discord.Color.red()
+                    )
+                    await registrar_log_sancion(member.guild, embed_log)
                     break
         except Exception as e:
             print(f"Error en anti-bots: {e}")
@@ -196,6 +216,14 @@ async def on_message(message):
                 duracion_timeout = config_global["antispam_timeout_segundos"]
                 await message.author.timeout(discord.utils.utcnow() + discord.Timedelta(seconds=duracion_timeout), reason="Anti-spam automático")
                 base_datos_sanciones[autor_id].append(f"🔇 **Timeout automático por Spam** ({duracion_timeout}s)")
+                
+                embed_log = discord.Embed(
+                    title="🔇 Timeout Automático (Anti-Spam)",
+                    description=f"**Usuario:** {message.author.mention}\n**Duración:** {duracion_timeout} segundos",
+                    color=discord.Color.orange()
+                )
+                await registrar_log_sancion(message.guild, embed_log)
+
                 warning = await message.channel.send(f"⚠️ {message.author.mention} ha recibido un **Timeout de {duracion_timeout} segundos** por spam.")
                 await asyncio.sleep(5)
                 await warning.delete()
@@ -206,7 +234,7 @@ async def on_message(message):
     if message.content.startswith(config_global["prefijo"]):
         contenido = message.content[len(config_global["prefijo"]):].strip().lower()
         if contenido == "ayuda" or contenido == "help":
-            await message.channel.send(f"⚙️️ El prefijo actual es `{config_global['prefijo']}`. Usa `/help` para ver los comandos.")
+            await message.channel.send(f"⚙️ El prefijo actual es `{config_global['prefijo']}`. Usa `/help` para ver los comandos.")
         return
 
 
@@ -246,12 +274,12 @@ class ModalConfigFormulario(discord.ui.Modal):
         await interaction.response.send_message(f"✅ ¡Formulario de **{self.tipo.upper()}** actualizado!", ephemeral=True)
 
 
-class ModalConfigGeneral(discord.ui.Modal, title="Configuración General y Seguridad"):
+class ModalConfigGeneral(discord.ui.Modal, title="Configuración General y Sanciones"):
     input_prefijo = discord.ui.TextInput(label="Prefijo del Bot", default=config_global["prefijo"], required=True, max_length=5)
     rol_cmd_id = discord.ui.TextInput(label="ID Rol Ejecutar Postulación", default=str(config_global["rol_comandos_id"] or ""), required=False, max_length=20)
     rol_atc_id = discord.ui.TextInput(label="ID Rol Staff", default=str(config_global["rol_atencion_id"] or ""), required=False, max_length=20)
     canal_log_id = discord.ui.TextInput(label="ID Canal Respuestas Postulaciones", default=str(config_global["canal_logs_id"] or ""), required=False, max_length=20)
-    antispam_time = discord.ui.TextInput(label="Timeout por Spam (Segundos)", default=str(config_global["antispam_timeout_segundos"]), required=True, max_length=5)
+    canal_sanciones_id = discord.ui.TextInput(label="ID Canal Logs de Sanciones", default=str(config_global["canal_sanciones_id"] or ""), required=False, max_length=20)
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -259,7 +287,7 @@ class ModalConfigGeneral(discord.ui.Modal, title="Configuración General y Segur
             config_global["rol_comandos_id"] = int(self.rol_cmd_id.value.strip()) if self.rol_cmd_id.value.strip() else None
             config_global["rol_atencion_id"] = int(self.rol_atc_id.value.strip()) if self.rol_atc_id.value.strip() else None
             config_global["canal_logs_id"] = int(self.canal_log_id.value.strip()) if self.canal_log_id.value.strip() else None
-            config_global["antispam_timeout_segundos"] = int(self.antispam_time.value.strip())
+            config_global["canal_sanciones_id"] = int(self.canal_sanciones_id.value.strip()) if self.canal_sanciones_id.value.strip() else None
 
             await interaction.response.send_message("✅ ¡Configuración general guardada con éxito!", ephemeral=True)
         except ValueError:
@@ -269,7 +297,7 @@ class ModalConfigGeneral(discord.ui.Modal, title="Configuración General y Segur
 class ModalConfigTicket(discord.ui.Modal, title="Configurar Panel de Tickets (Luminous)"):
     titulo = discord.ui.TextInput(label="Título del Embed", default=config_global["ticket_titulo"], required=True, max_length=100)
     color = discord.ui.TextInput(label="Color Hex (ej: #5865F2)", default=f"#{config_global['ticket_color']:06x}", required=True, max_length=7)
-    boton = discord.ui.TextInput(label="Texto del Botón / Opción", default=config_global["ticket_boton_texto"], required=True, max_length=80)
+    boton = discord.ui.TextInput(label="Texto del Botón", default=config_global["ticket_boton_texto"], required=True, max_length=80)
     canal_id = discord.ui.TextInput(label="ID Canal para enviar el Panel", default=str(config_global["canal_tickets_id"] or ""), required=False, max_length=20)
     bienvenida = discord.ui.TextInput(label="Mensaje de bienvenida en el Ticket", style=discord.TextStyle.paragraph, default=config_global["ticket_bienvenida"], required=True, max_length=500)
 
@@ -352,7 +380,7 @@ async def configuracion(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=VistaMenuConfiguracion(), ephemeral=True)
 
 
-@client.tree.command(name="confi-general", description="Configura prefijo, roles, canal de respuestas y anti-spam")
+@client.tree.command(name="confi-general", description="Configura prefijo, roles, canales de respuestas/sanciones y anti-spam")
 async def confi_general(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
@@ -543,12 +571,14 @@ class VistaRevisionPostulacion(discord.ui.View):
 
     @discord.ui.button(label="✅ Aprobado", style=discord.ButtonStyle.success, custom_id="btn_aprobar")
     async def aprobar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not verificar_permisos_atencion(interaction): return await interaction.response.send_message("❌ Sin permisos de staff.", ephemeral=True)
+        if not interaction.user.guild_permissions.manage_roles and not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("❌ Sin permisos de staff.", ephemeral=True)
         await interaction.response.send_modal(ModalNotaStaff("APROBADO", self.autor_postulacion))
 
     @discord.ui.button(label="❌ Rechazado", style=discord.ButtonStyle.danger, custom_id="btn_rechazar")
     async def rechazar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not verificar_permisos_atencion(interaction): return await interaction.response.send_message("❌ Sin permisos de staff.", ephemeral=True)
+        if not interaction.user.guild_permissions.manage_roles and not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("❌ Sin permisos de staff.", ephemeral=True)
         await interaction.response.send_modal(ModalNotaStaff("RECHAZADO", self.autor_postulacion))
 
 
@@ -592,7 +622,7 @@ class VistaMenuPostulacion(discord.ui.View):
 @client.tree.command(name="postulacion", description="Inicia un panel de postulación interactivo eligiendo el tipo")
 @app_commands.describe(miembro="Usuario al que se le asignará la postulación")
 async def postulacion(interaction: discord.Interaction, miembro: discord.Member):
-    if not verificar_permisos_comandos(interaction):
+    if not interaction.user.guild_permissions.manage_roles and not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message("❌ No tienes permisos para ejecutar este comando.", ephemeral=True)
 
     embed = discord.Embed(
@@ -604,7 +634,7 @@ async def postulacion(interaction: discord.Interaction, miembro: discord.Member)
 
 
 # ==========================================
-# 🛡️ SISTEMA DE SANCIONES Y HISTORIAL
+# 🛡️ SISTEMA DE SANCIONES, UNBAN E HISTORIAL
 # ==========================================
 
 @client.tree.command(name="ban", description="Banea a un miembro del servidor")
@@ -615,9 +645,39 @@ async def ban(interaction: discord.Interaction, miembro: discord.Member, razon: 
     try:
         await miembro.ban(reason=razon)
         base_datos_sanciones[miembro.id].append(f"🔨 **Ban** por {interaction.user} - Razón: {razon}")
+        
+        embed_log = discord.Embed(title="🔨 Baneo Aplicado", description=f"**Usuario:** {miembro} (`{miembro.id}`)\n**Moderador:** {interaction.user.mention}\n**Razón:** {razon}", color=discord.Color.red())
+        await registrar_log_sancion(interaction.guild, embed_log)
+
         await interaction.response.send_message(f"🔨 {miembro.mention} ha sido baneado. Razón: *{razon}*")
     except Exception as e:
         await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+
+
+@client.tree.command(name="unban", description="Desbanea a un usuario mediante su ID o Nombre")
+@app_commands.describe(usuario_id="ID de Discord del usuario baneado", razon="Motivo del desbaneo")
+async def unban(interaction: discord.Interaction, usuario_id: str, razon: str = "Sin motivo especificado"):
+    if not interaction.user.guild_permissions.ban_members:
+        return await interaction.response.send_message("❌ No tienes permisos para desbanear.", ephemeral=True)
+    try:
+        ban_entry = None
+        async for entry in interaction.guild.bans():
+            if str(entry.user.id) == usuario_id.strip() or entry.user.name.lower() == usuario_id.strip().lower():
+                ban_entry = entry
+                break
+        
+        if not ban_entry:
+            return await interaction.response.send_message("❌ No se encontró ningún baneo activo con ese ID o Nombre en el servidor.", ephemeral=True)
+
+        await interaction.guild.unban(ban_entry.user, reason=razon)
+        
+        embed_log = discord.Embed(title="🔓 Usuario Desbaneado", description=f"**Usuario:** {ban_entry.user} (`{ban_entry.user.id}`)\n**Moderador:** {interaction.user.mention}\n**Razón:** {razon}", color=discord.Color.green())
+        await registrar_log_sancion(interaction.guild, embed_log)
+
+        await interaction.response.send_message(f"🔓 Se ha desbaneado exitosamente a **{ban_entry.user}**.")
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Error al desbanear: {e}", ephemeral=True)
+
 
 @client.tree.command(name="kick", description="Expulsa a un miembro del servidor")
 @app_commands.describe(miembro="Miembro a expulsar", razon="Motivo")
@@ -627,9 +687,14 @@ async def kick(interaction: discord.Interaction, miembro: discord.Member, razon:
     try:
         await miembro.kick(reason=razon)
         base_datos_sanciones[miembro.id].append(f"👢 **Kick** por {interaction.user} - Razón: {razon}")
+        
+        embed_log = discord.Embed(title="👢 Miembro Expulsado", description=f"**Usuario:** {miembro} (`{miembro.id}`)\n**Moderador:** {interaction.user.mention}\n**Razón:** {razon}", color=discord.Color.orange())
+        await registrar_log_sancion(interaction.guild, embed_log)
+
         await interaction.response.send_message(f"👢 {miembro.mention} expulsado. Razón: *{razon}*")
     except Exception as e:
         await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+
 
 @client.tree.command(name="mute", description="Silencia temporalmente a un miembro")
 @app_commands.describe(miembro="Miembro", segundos="Duración en segundos", razon="Motivo")
@@ -639,20 +704,26 @@ async def mute(interaction: discord.Interaction, miembro: discord.Member, segund
     try:
         await miembro.timeout(discord.utils.utcnow() + discord.Timedelta(seconds=segundos), reason=razon)
         base_datos_sanciones[miembro.id].append(f"🔇 **Mute** ({segundos}s) por {interaction.user} - Razón: {razon}")
+        
+        embed_log = discord.Embed(title="🔇 Timeout Aplicado", description=f"**Usuario:** {miembro} (`{miembro.id}`)\n**Duración:** {segundos}s\n**Moderador:** {interaction.user.mention}\n**Razón:** {razon}", color=discord.Color.orange())
+        await registrar_log_sancion(interaction.guild, embed_log)
+
         await interaction.response.send_message(f"🔇 {miembro.mention} silenciado por {segundos}s. Razón: *{razon}*")
     except Exception as e:
         await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
 
+
 @client.tree.command(name="unmute", description="Quita el timeout a un miembro")
 @app_commands.describe(miembro="Miembro")
 async def unmute(interaction: discord.Interaction, miembro: discord.Member):
-    if not interaction.user.moderate_members if hasattr(interaction.user, 'moderate_members') else interaction.user.guild_permissions.moderate_members:
+    if not interaction.user.guild_permissions.moderate_members:
         return await interaction.response.send_message("❌ No tienes permisos.", ephemeral=True)
     try:
         await miembro.timeout(None, reason="Desmuteado por staff")
         await interaction.response.send_message(f"🔊 {miembro.mention} desmuteado.")
     except Exception as e:
         await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+
 
 @client.tree.command(name="warn", description="Advierte a un miembro")
 @app_commands.describe(miembro="Miembro", razon="Motivo de la advertencia")
@@ -661,11 +732,16 @@ async def warn(interaction: discord.Interaction, miembro: discord.Member, razon:
         return await interaction.response.send_message("❌ No tienes permisos.", ephemeral=True)
     try:
         base_datos_sanciones[miembro.id].append(f"⚠️ **Warn** por {interaction.user} - Razón: {razon}")
+        
+        embed_log = discord.Embed(title="⚠️ Advertencia (Warn)", description=f"**Usuario:** {miembro} (`{miembro.id}`)\n**Moderador:** {interaction.user.mention}\n**Razón:** {razon}", color=discord.Color.yellow())
+        await registrar_log_sancion(interaction.guild, embed_log)
+
         embed_warn = discord.Embed(title="⚠️ Advertencia", description=f"Has recibido una advertencia en **{interaction.guild.name}**.\n**Razón:** {razon}", color=0xF1C40F)
         await miembro.send(embed=embed_warn)
         await interaction.response.send_message(f"⚠️ {miembro.mention} advertido correctamente.")
     except:
         await interaction.response.send_message(f"⚠️ {miembro.mention} advertido (tenía los MD cerrados).")
+
 
 @client.tree.command(name="historial", description="Muestra el historial de sanciones de un usuario")
 @app_commands.describe(miembro="Miembro a consultar")
@@ -678,11 +754,7 @@ async def historial(interaction: discord.Interaction, miembro: discord.Member):
         return await interaction.response.send_message(f"🛡️ {miembro.mention} no tiene ninguna sanción registrada en el sistema.", ephemeral=True)
 
     texto_sanciones = "\n".join([f"• {s}" for s in sanciones])
-    embed = discord.Embed(
-        title=f"📜 Historial de Sanciones: {miembro.display_name}",
-        description=texto_sanciones,
-        color=0xE74C3C
-    )
+    embed = discord.Embed(title=f"📜 Historial de Sanciones: {miembro.display_name}", description=texto_sanciones, color=0xE74C3C)
     embed.set_thumbnail(url=miembro.display_avatar.url)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -698,9 +770,9 @@ async def help_command(interaction: discord.Interaction):
         description=f"Prefijo de texto actual: `{config_global['prefijo']}`\nExplora los módulos disponibles:",
         color=0x5865F2
     )
-    embed.add_field(name="⚙️ Configuración", value="• `/configuracion` ➜ Formularios y tickets (Luminous).\n• `/confi-general` ➜ Prefijo, roles, canales y timeout por spam.", inline=False)
+    embed.add_field(name="⚙️️ Configuración", value="• `/configuracion` ➜ Formularios y tickets.\n• `/confi-general` ➜ Prefijo, roles, canales y logs de sanciones.", inline=False)
     embed.add_field(name="📋 Postulaciones y Soporte", value="• `/postulacion [miembro]`\n• `/ticket`", inline=False)
-    embed.add_field(name="🛡️ Moderación y Sanciones", value="• `/ban` • `/kick` • `/mute` • `/unmute` • `/warn` • `/historial [miembro]`", inline=False)
+    embed.add_field(name="🛡️ Moderación y Sanciones", value="• `/ban` • `/unban` • `/kick` • `/mute` • `/unmute` • `/warn` • `/historial`", inline=False)
     embed.add_field(name="🎮 Entretenimiento", value="• `/juegos` • `/dado` • `/ppt [miembro]` • `/trivia`", inline=False)
     embed.set_footer(text=f"Solicitado por {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
     await interaction.response.send_message(embed=embed, ephemeral=True)
