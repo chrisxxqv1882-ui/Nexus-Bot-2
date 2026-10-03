@@ -6,20 +6,19 @@ from collections import defaultdict
 import discord
 from discord import app_commands
 
-# Configuración global del bot, roles, canales, prefijo, anti-spam y tickets
+# Configuración global del bot
 config_global = {
     "prefijo": "a¡",
     "rol_comandos_id": None,  
     "rol_atencion_id": None,   
     "canal_logs_id": None,     
-    "canal_tickets_id": None,  # Canal donde se enviará el panel de tickets
+    "canal_tickets_id": None,  
     "contador_postulaciones": 0, 
     "antispam_activo": True,
     "antispam_limite_mensajes": 5,
     "antispam_ventana_segundos": 5,
     "antispam_timeout_segundos": 60,
     "antibots_activo": True,
-    # Configuración del embed de tickets estilo Luminous
     "ticket_titulo": "🎟️ Sistema de Soporte y Tickets",
     "ticket_desc": "Haz clic en el botón inferior para abrir un ticket privado con el staff.",
     "ticket_color": 0x5865F2,
@@ -166,9 +165,7 @@ async def on_member_join(member):
             async for entry in member.guild.audit_logs(limit=5, action=discord.AuditLogAction.bot_add):
                 if entry.target.id == member.id:
                     invitador = entry.user
-                    # Banear al bot
                     await member.guild.ban(member, reason="Anti-Bots: Bot no autorizado")
-                    # Banear al invitador si no es admin
                     if invitador and not invitador.guild_permissions.administrator:
                         await member.guild.ban(invitador, reason="Anti-Bots: Invitó un bot no autorizado")
                     break
@@ -264,7 +261,6 @@ class ModalConfigSistema(discord.ui.Modal, title="Configuración General y Segur
             await interaction.response.send_message("❌ Error: Asegúrate de ingresar valores numéricos válidos en los IDs y límites.", ephemeral=True)
 
 
-# --- MODAL CONFIGURAR TICKET ESTILO LUMINOUS ---
 class ModalConfigTicket(discord.ui.Modal, title="Configurar Panel de Tickets"):
     titulo = discord.ui.TextInput(label="Título del Embed", default=config_global["ticket_titulo"], required=True, max_length=100)
     color = discord.ui.TextInput(label="Color Hex (ej: #5865F2)", default=f"#{config_global['ticket_color']:06x}", required=True, max_length=7)
@@ -287,7 +283,6 @@ class ModalConfigTicket(discord.ui.Modal, title="Configurar Panel de Tickets"):
         await interaction.response.send_message("✅ ¡Configuración de tickets actualizada correctamente!", ephemeral=True)
 
 
-# --- BOTONES PARA FORMULARIOS ---
 class VistaBotonesFormularios(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=60)
@@ -313,7 +308,6 @@ class VistaBotonesFormularios(discord.ui.View):
 class SelectorConfiguracion(discord.ui.Select):
     def __init__(self):
         options = [
-            discord.SelectOption(label="Prefijo, Roles, Canal de Logs y Anti-Spam", description="Ajusta seguridad, canal y timeout", emoji="⚙️", value="sistema"),
             discord.SelectOption(label="Configurar Formularios (Staff, Ally, Redes, Nexus)", description="Abre panel con botones para editar preguntas", emoji="📝", value="formularios"),
             discord.SelectOption(label="Configurar Bot de Tickets (Luminous)", description="Edita título, color y botón del panel de tickets", emoji="🎫", value="tickets")
         ]
@@ -324,9 +318,7 @@ class SelectorConfiguracion(discord.ui.Select):
         if not interaction.user.guild_permissions.administrator:
             return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
 
-        if val == "sistema":
-            await interaction.response.send_modal(ModalConfigSistema())
-        elif val == "formularios":
+        if val == "formularios":
             embed_forms = discord.Embed(
                 title="📝 Panel de Configuración de Formularios",
                 description="Haz clic en los botones inferiores para editar los títulos, colores y preguntas:",
@@ -343,28 +335,30 @@ class VistaMenuConfiguracion(discord.ui.View):
         self.add_item(SelectorConfiguracion())
 
 
-@client.tree.command(name="configuracion", description="Panel de configuración general con menú desplegable")
+@client.tree.command(name="configuracion", description="Panel de configuración de formularios y tickets")
 async def configuracion(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
 
-    r_cmd = interaction.guild.get_role(config_global["rol_comandos_id"]) if config_global["rol_comandos_id"] else "No asignado"
-    r_atc = interaction.guild.get_role(config_global["rol_atencion_id"]) if config_global["rol_atencion_id"] else "No asignado"
-    c_log = interaction.guild.get_channel(config_global["canal_logs_id"]) if config_global["canal_logs_id"] else "No asignado"
-
     embed = discord.Embed(
-        title="⚙️ Panel de Configuración General",
-        description=f"Prefijo actual: `{config_global['prefijo']}`\nAnti-spam: `{'Activado' if config_global['antispam_activo'] else 'Desactivado'}` (Timeout: {config_global['antispam_timeout_segundos']}s)\nAnti-bots: `Activado`\n\nUsa el menú desplegable de abajo para editar.",
+        title="⚙️ Panel de Configuración",
+        description="Usa el menú desplegable de abajo para configurar los formularios de postulación o el sistema de tickets estilo Luminous.",
         color=0x3498db
     )
-    embed.add_field(name="🛡️ Seguridad y Roles", value=f"• **Ejecutar Postulaciones:** {r_cmd.mention if isinstance(r_cmd, discord.Role) else r_cmd}\n• **Revisar / Staff:** {r_atc.mention if isinstance(r_atc, discord.Role) else r_atc}", inline=False)
-    embed.add_field(name="📢 Canales", value=f"• **Canal de Respuestas:** {c_log.mention if isinstance(c_log, discord.TextChannel) else c_log}", inline=False)
-
     await interaction.response.send_message(embed=embed, view=VistaMenuConfiguracion(), ephemeral=True)
 
 
+# --- NUEVO COMANDO /confi-general ---
+@client.tree.command(name="confi-general", description="Configura prefijo, roles, canal de respuestas y parámetros anti-spam")
+async def confi_general(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
+    
+    await interaction.response.send_modal(ModalConfigSistema())
+
+
 # ==========================================
-# 🎫 SISTEMA DE TICKETS ESTILO LUMINOUS
+# 🎫 SISTEMA DE TICKETS
 # ==========================================
 
 class VistaCerrarTicket(discord.ui.View):
@@ -659,7 +653,7 @@ async def warn(interaction: discord.Interaction, miembro: discord.Member, razon:
         return await interaction.response.send_message("❌ No tienes permisos.", ephemeral=True)
     try:
         embed_warn = discord.Embed(
-            title="⚠️ Advertencia (Warn)",
+            title="⚠️️ Advertencia (Warn)",
             description=f"Has recibido una advertencia en **{interaction.guild.name}**.\n**Razón:** {razon}",
             color=0xF1C40F
         )
@@ -670,7 +664,7 @@ async def warn(interaction: discord.Interaction, miembro: discord.Member, razon:
 
 
 # ==========================================
-# 🎮 JUEGOS Y TRIVIA (PPT de 2 jugadores)
+# 🎮 JUEGOS Y TRIVIA
 # ==========================================
 
 @client.tree.command(name="help", description="Muestra la lista completa de comandos y módulos del bot")
@@ -680,11 +674,11 @@ async def help_command(interaction: discord.Interaction):
         description=f"Prefijo de texto actual: `{config_global['prefijo']}`\nExplora todos los módulos y comandos disponibles:",
         color=0x5865F2
     )
-    embed.add_field(name="⚙️ Configuración & Sistema", value="• `/configuracion` ➜ Menú para prefijo, roles, anti-spam, timeouts, formularios y tickets.", inline=False)
-    embed.add_field(name="📋 Postulaciones", value="• `/postulacion [miembro]` ➜ Abre el panel interactivo para postular usuarios.", inline=False)
-    embed.add_field(name="🎫 Tickets", value="• `/ticket` ➜ Publica el panel de soporte estilo Luminous.", inline=False)
-    embed.add_field(name="🛡️ Moderación & Sanciones", value="• `/ban` • `/kick` • `/mute` • `/unmute` • `/warn`", inline=False)
-    embed.add_field(name="🎮 Entretenimiento", value="• `/juegos` • `/dado` • `/ppt [opcional miembro]` • `/trivia`", inline=False)
+    embed.add_field(name="⚙️ Configuración & Sistema", value="• `/configuracion` ➜ Gestiona formularios y tickets.\n• `/confi-general` ➜ Prefijo, roles, canal y anti-spam.", inline=False)
+    embed.add_field(name="📋 Postulaciones", value="• `/postulacion [miembro]` ➜ Panel interactivo de postulaciones.", inline=False)
+    embed.add_field(name="🎫 Tickets", value="• `/ticket` ➜ Publica el panel de soporte.", inline=False)
+    embed.add_field(name="🛡️ Sanciones de Moderación", value="• `/ban` • `/kick` • `/mute` • `/unmute` • `/warn`", inline=False)
+    embed.add_field(name="🎮 Entretenimiento", value="• `/juegos` • `/dado` • `/ppt [miembro]` • `/trivia`", inline=False)
     embed.set_footer(text=f"Solicitado por {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -722,37 +716,7 @@ class VistaEleccionPPT(discord.ui.View):
     async def papel(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.procesar_jugada(interaction, "papel")
 
-    @discord.ui.button(label="✂️ Tijera", style=discord.ButtonStyle.secondary)
-    async def tijera(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.procesar_jugada(interaction, "tijera")
-
-    async def procesar_jugada(self, interaction: discord.Interaction, jugada: str):
-        if interaction.user.id != self.retado.id:
-            return await interaction.response.send_message("❌ Este duelo no es para ti.", ephemeral=True)
-
-        self.jugada_retado = jugada
-        r1, r2 = self.jugada_retador, self.jugada_retado
-
-        if r1 == r2:
-            res = "¡Empate técnico! 🤝"
-        elif (r1 == "piedra" and r2 == "tijera") or (r1 == "papel" and r2 == "piedra") or (r1 == "tijera" and r2 == "papel"):
-            res = f"🎉 ¡{self.retador.mention} gana el duelo con **{r1}** frente a **{r2}**!"
-        else:
-            res = f"🎉 ¡{self.retado.mention} gana el duelo con **{r2}** frente a **{r1}**!"
-
-        for child in self.children: child.disabled = True
-        await interaction.message.edit(view=self)
-        await interaction.response.send_message(f"⚔️ **Resultado Duelo PPT**:\n{self.retador.mention} (`{r1}`) vs {self.retado.mention} (`{r2}`)\n\n{res}")
-
-
-class SelectorPPTInicial(discord.ui.Select):
-    def __init__(self, retador: discord.Member, retado: discord.Member):
-        self.retador = retador
-        self.retado = retado
-        options = [
-            discord.SelectOption(label="Piedra", emoji="🪨", value="piedra"),
-            discord.SelectOption(label="Papel", emoji="📄", value="papel"),
-            discord.SelectOption(label="Tijera", emoji="✂️", value="tijera")
+    discord.SelectOption(label="Tijera", emoji="✂️", value="tijera")
         ]
         super().__init__(placeholder="Elige tu jugada secreta...", options=options)
 
