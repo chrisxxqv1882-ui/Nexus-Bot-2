@@ -1,960 +1,416 @@
 import os
+import json
 import random
-import asyncio
-import time
-from collections import defaultdict
 import discord
 from discord import app_commands
 
-# Configuración global avanzada del bot
-config_global = {
-    "prefijo": "a¡",
-    "rol_organizar_eventos_id": None, 
-    "rol_aprobar_sugerencias_id": None, 
-    "rol_ejecutar_postulaciones_id": None, 
-    "rol_aprobar_postulaciones_id": None,  
-    "canal_sanciones_id": None, 
-    "canal_sugerencias_id": None, 
-    "canal_postulaciones_id": None, 
-    "contador_postulaciones": 0, 
-    # Anti-Spam
-    "antispam_activo": True,
-    "antispam_limite_mensajes": 5,
-    "antispam_ventana_segundos": 5,
-    "antispam_timeout_segundos": 60,
-    # Anti-Bot y Anti-Raid Avanzado
-    "antibots_activo": True, # ¡Ahora se puede activar/desactivar!
-    "antiraid_activo": True,
-    "antiraid_limite_ingresos": 5,
-    "antiraid_ventana_segundos": 10,
-    # Juegos
-    "embed_juegos_titulo": "🎮 Zona de Juegos e Interacción",
-    "embed_juegos_desc": "¡Diviértete con los minijuegos multijugador y nuestra trivia masiva estilo Nekotrivia!",
-    "embed_juegos_color": 0xF1C40F
-}
-
-registro_antispam = defaultdict(list)
-registro_antiraid = defaultdict(list)
-base_datos_sanciones = defaultdict(list)
-eventos_activos = {} 
-
-# CONFIGURACIÓN DE POSTULACIONES (CON VARIABLES MÁGICAS Y MENSAJES DE VEREDICTO EDITABLES)
-postulaciones_config = {
-    "staff": {
-        "titulo": "🛡️ POSTULACIÓN STAFF — {servidor}",
-        "descripcion": "Candidato: {mencion}\nHaz clic en el botón inferior para iniciar tu postulación al Cuerpo de Moderación en tus **Mensajes Privados (MD)**.",
-        "color": 0x3498DB,
-        "msg_aprobado": "🎉 ¡Hola {usuario}! Tu postulación (#{numero}) para **Staff** en **{servidor}** ha sido **APROBADA** con éxito. ¡Bienvenido/a al equipo!",
-        "msg_rechazado": "❌ Hola {usuario}, lamentamos informarte que tu postulación (#{numero}) para **Staff** en **{servidor}** no ha sido aceptada en esta ocasión. ¡Gracias por participar!",
-        "preguntas": [
-            "1. Nombre / Apodo:",
-            "2. Edad:",
-            "3. País / Zona horaria:",
-            "4. ¿Cuánto tiempo llevas en Hakkuze?",
-            "5. ¿Has sido Staff anteriormente? (Sí / No y breve experiencia)",
-            "6. ¿Qué experiencia tienes moderando servidores de Discord?",
-            "7. ¿Qué bots o herramientas de Discord sabes utilizar?",
-            "8. Un usuario está incumpliendo las normas constantemente. ¿Qué harías?",
-            "9. Un amigo tuyo rompe una regla. ¿Lo sancionarías? ¿Por qué?",
-            "10. ¿Qué harías si ves a otro Staff abusando de sus permisos?",
-            "11. ¿Por qué quieres ser Staff de Hakkuze?",
-            "12. ¿Qué podrías aportar al servidor?",
-            "13. ¿Qué área te interesa? (Moderación / Soporte / Eventos / Alianzas / Otra)",
-            "14. ¿Cuánto tiempo podrías dedicar diariamente al servidor?",
-            "15. ¿Por qué deberíamos elegirte?"
-        ]
-    },
-    "ally": {
-        "titulo": "🤝 POSTULACIÓN CASA ALIANZA — {servidor}",
-        "descripcion": "Candidato: {mencion}\nHaz clic en el botón inferior para registrar tu alianza en tus **Mensajes Privados (MD)**.",
-        "color": 0x2ECC71,
-        "msg_aprobado": "🎉 ¡Hola {usuario}! Tu postulación (#{numero}) de alianza en **{servidor}** ha sido **APROBADA**. ¡Hablaremos pronto!",
-        "msg_rechazado": "❌ Hola {usuario}, tu postulación (#{numero}) de alianza en **{servidor}** ha sido rechazada en esta ocasión.",
-        "preguntas": [
-            "1. Nombre / Apodo:",
-            "2. ¿Cuál es el nombre y temática de tu servidor?",
-            "3. ¿Cuántos miembros activos tienes?",
-            "4. ¿Cuál es el link de invitación permanente de tu servidor?"
-        ]
-    }
-}
-
-BANCO_TRIVIA = [
-    {
-        "p": "¿Cómo se llama el protagonista de Dragon Ball que come sin parar?",
-        "correcta": "Goku",
-        "opciones": ["Vegeta", "Goku", "Piccolo", "Krillin"],
-        "cat": "Anime",
-        "img": "https://media.giphy.com/media/cb9aF9tDyiRkY/giphy.gif"
-    }
-]
+# ──────────────────────────── Base de datos (JSON) ────────────────────────────
+DB_FILE = "data.json"
+try:
+    with open(DB_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+except Exception:
+    data = {}
 
 
-class Bot(discord.Client):
+def save():
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def cfg(guild_id):
+    g = data.setdefault(str(guild_id), {})
+    g.setdefault("sug", {"canal": None, "roles": [], "items": {}})
+    return g
+
+
+# ──────────────────────────────── Cliente ────────────────────────────────────
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
+
+
+class Nexus(discord.Client):
     def __init__(self):
-        intents = discord.Intents.default()
-        intents.message_content = True
-        intents.members = True
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
+        self.add_view(SugerenciaView())  # botones persistentes tras reiniciar
         await self.tree.sync()
-        print("¡Slash commands sincronizados!")
 
-client = Bot()
+
+client = Nexus()
+tree = client.tree
+
 
 @client.event
 async def on_ready():
-    print(f'¡Bot conectado con éxito como {client.user}!')
+    print(f"✅ {client.user} listo")
 
 
-async def registrar_log_sancion(guild: discord.Guild, embed: discord.Embed):
-    canal_id = config_global["canal_sanciones_id"]
-    if canal_id:
-        canal = guild.get_channel(canal_id)
-        if canal:
-            try: await canal.send(embed=embed)
-            except: pass
-
-
-def aplicar_variables(texto: str, miembro: discord.Member, numero: int = 0) -> str:
-    if not texto: return ""
-    return (
-        texto.replace("{usuario}", miembro.name)
-             .replace("{mencion}", miembro.mention)
-             .replace("{id}", str(miembro.id))
-             .replace("{numero}", str(numero))
-             .replace("{servidor}", miembro.guild.name)
-    )
-
-
-def verificar_jerarquia(autor: discord.Member, objetivo: discord.Member) -> bool:
-    if autor.guild.owner_id == autor.id:
-        return True
-    if objetivo.guild.owner_id == objetivo.id:
-        return False
-    return autor.top_role > objetivo.top_role
-
-
-# ==========================================
-# 🛡 SISTEMA AVANZADO ANTI-BOT Y ANTI-RAID
-# ==========================================
-
-@client.event
-async def on_member_join(member):
-    guild = member.guild
-    ahora = time.time()
-
-    if config_global["antiraid_activo"]:
-        registro_antiraid[guild.id] = [t for t in registro_antiraid[guild.id] if ahora - t < config_global["antiraid_ventana_segundos"]]
-        registro_antiraid[guild.id].append(ahora)
-
-        if len(registro_antiraid[guild.id]) > config_global["antiraid_limite_ingresos"]:
-            try:
-                embed_raid = discord.Embed(
-                    title="🚨 ¡ALERTA ANTI-RAID ACTIVADA!",
-                    description=f"Se detectó un ingreso masivo de cuentas en **{guild.name}**.",
-                    color=discord.Color.red()
-                )
-                await registrar_log_sancion(guild, embed_raid)
-            except: pass
-
-    # Verificación de si el Anti-Bot está activo
-    if member.bot and config_global["antibots_activo"]:
-        try:
-            async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.bot_add):
-                if entry.target.id == member.id:
-                    invitador = entry.user
-                    await guild.ban(member, reason="Anti-Bots: Bot no autorizado")
-                    
-                    if invitador and not invitador.guild_permissions.administrator:
-                        await guild.ban(invitador, reason="Anti-Bots: Invitó un bot no autorizado sin permisos")
-                    
-                    embed_log = discord.Embed(
-                        title="🤖 Anti-Bots Activado", 
-                        description=f"Bot no autorizado {member.mention} baneado.\nInvitador: {invitador.mention if invitador else 'Desconocido'}", 
-                        color=discord.Color.red()
-                    )
-                    await registrar_log_sancion(guild, embed_log)
-                    break
-        except Exception as e:
-            print(f"Error en anti-bots: {e}")
-
-
-# ==========================================
-# 💡 SISTEMA DE SUGERENCIAS AUTOMÁTICO
-# ==========================================
-
-class VistaSugerenciaStaff(discord.ui.View):
-    def __init__(self, autor_id: int):
-        super().__init__(timeout=None)
-        self.autor_id = autor_id
-
-    @discord.ui.button(label="✅ Aprobar", style=discord.ButtonStyle.success, custom_id="btn_aprobar_sugerencia")
-    async def aprobar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        rol_req_id = config_global["rol_aprobar_sugerencias_id"]
-        tiene_permiso = interaction.user.guild_permissions.administrator
-        if not tiene_permiso and rol_req_id:
-            rol = interaction.guild.get_role(rol_req_id)
-            if rol and rol in interaction.user.roles: tiene_permiso = True
-
-        if not tiene_permiso:
-            return await interaction.response.send_message("❌ No tienes permisos para aprobar sugerencias.", ephemeral=True)
-
-        for child in self.children: child.disabled = True
-        embed = interaction.message.embeds[0]
-        embed.color = discord.Color.green()
-        embed.add_field(name="📌 Estado", value=f"✅ **Aprobada** por {interaction.user.mention}", inline=False)
-        await interaction.message.edit(embed=embed, view=self)
-
-        try:
-            usuario = interaction.guild.get_member(self.autor_id)
-            if usuario:
-                embed_md = discord.Embed(
-                    title="💡 Sugerencia Aprobada",
-                    description=f"¡Tu sugerencia en **{interaction.guild.name}** ha sido **APROBADA**!\n\n**Sugerencia:**\n{embed.description}",
-                    color=discord.Color.green()
-                )
-                await usuario.send(embed=embed_md)
-        except: pass
-
-        await interaction.response.send_message("✅ Sugerencia aprobada.", ephemeral=True)
-
-    @discord.ui.button(label="❌ Rechazar", style=discord.ButtonStyle.danger, custom_id="btn_rechazar_sugerencia")
-    async def rechazar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        rol_req_id = config_global["rol_aprobar_sugerencias_id"]
-        tiene_permiso = interaction.user.guild_permissions.administrator
-        if not tiene_permiso and rol_req_id:
-            rol = interaction.guild.get_role(rol_req_id)
-            if rol and rol in interaction.user.roles: tiene_permiso = True
-
-        if not tiene_permiso:
-            return await interaction.response.send_message("❌ No tienes permisos para rechazar sugerencias.", ephemeral=True)
-
-        for child in self.children: child.disabled = True
-        embed = interaction.message.embeds[0]
-        embed.color = discord.Color.red()
-        embed.add_field(name="📌 Estado", value=f"❌ **Rechazada** por {interaction.user.mention}", inline=False)
-        await interaction.message.edit(embed=embed, view=self)
-
-        try:
-            usuario = interaction.guild.get_member(self.autor_id)
-            if usuario:
-                embed_md = discord.Embed(
-                    title="💡 Sugerencia Rechazada",
-                    description=f"Tu sugerencia en **{interaction.guild.name}** ha sido **rechazada**.\n\n**Sugerencia:**\n{embed.description}",
-                    color=discord.Color.red()
-                )
-                await usuario.send(embed=embed_md)
-        except: pass
-
-        await interaction.response.send_message("❌ Sugerencia rechazada.", ephemeral=True)
-
-
-@client.event
-async def on_message(message):
-    if message.author.bot or not message.guild:
-        return
-
-    canal_sugerencias_id = config_global["canal_sugerencias_id"]
-    if canal_sugerencias_id and message.channel.id == canal_sugerencias_id:
-        try:
-            await message.delete()
-            embed = discord.Embed(title="💡 Nueva Sugerencia", description=message.content, color=0x3498DB)
-            embed.set_author(name=message.author.display_name, icon_url=message.author.display_avatar.url)
-            embed.set_footer(text=f"ID: {message.author.id}")
-
-            nuevo_msg = await message.channel.send(embed=embed, view=VistaSugerenciaStaff(message.author.id))
-            await nuevo_msg.add_reaction("👍")
-            await nuevo_msg.add_reaction("👎")
-        except Exception as e:
-            print(f"Error en sugerencias: {e}")
-        return
-
-    if config_global["antispam_activo"] and not message.author.guild_permissions.administrator:
-        ahora = time.time()
-        autor_id = message.author.id
-        ventana = config_global["antispam_ventana_segundos"]
-        registro_antispam[autor_id] = [t for t in registro_antispam[autor_id] if ahora - t < ventana]
-        registro_antispam[autor_id].append(ahora)
-
-        if len(registro_antispam[autor_id]) > config_global["antispam_limite_mensajes"]:
-            try:
-                await message.delete()
-                duracion_timeout = config_global["antispam_timeout_segundos"]
-                await message.author.timeout(discord.utils.utcnow() + discord.Timedelta(seconds=duracion_timeout), reason="Anti-spam automático")
-                base_datos_sanciones[autor_id].append(f"🔇 **Timeout automático** ({duracion_timeout}s)")
-                
-                embed_log = discord.Embed(title="🔇 Timeout Automático (Anti-Spam)", description=f"**Usuario:** {message.author.mention}", color=discord.Color.orange())
-                await registrar_log_sancion(message.guild, embed_log)
-
-                warning = await message.channel.send(f"⚠️ {message.author.mention} Timeout de {duracion_timeout}s por spam.")
-                await asyncio.sleep(5)
-                await warning.delete()
-            except: pass
-            return
-
-
-# ==========================================
-# ⚙️ /CONFI-GENERAL EN EMBED INTERACTIVO
-# ==========================================
-
-class VistaBotonConfigGeneral(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=120)
-
-    @discord.ui.button(label="✏️ Prefijo", style=discord.ButtonStyle.secondary, row=0)
-    async def set_prefijo(self, interaction: discord.Interaction, button: discord.ui.Button):
-        class M(discord.ui.Modal, title="Editar Prefijo"):
-            v = discord.ui.TextInput(label="Nuevo Prefijo", default=config_global["prefijo"], max_length=5)
-            async def on_submit(self, i: discord.Interaction):
-                config_global["prefijo"] = self.v.value.strip()
-                await i.response.send_message(f"✅ Prefijo actualizado a: `{config_global['prefijo']}`", ephemeral=True)
-        await interaction.response.send_modal(M())
-
-    @discord.ui.button(label="🤖 Toggle Anti-Bot", style=discord.ButtonStyle.secondary, row=0)
-    async def toggle_antibot(self, interaction: discord.Interaction, button: discord.ui.Button):
-        config_global["antibots_activo"] = not config_global["antibots_activo"]
-        estado = "Activado" if config_global["antibots_activo"] else "Desactivado"
-        await interaction.response.send_message(f"🤖 Sistema Anti-Bot ahora está: **{estado}**", ephemeral=True)
-
-    @discord.ui.button(label="👑 Rol Eventos", style=discord.ButtonStyle.secondary, row=0)
-    async def set_rolevento(self, interaction: discord.Interaction, button: discord.ui.Button):
-        class M(discord.ui.Modal, title="Configurar Rol Eventos"):
-            v = discord.ui.TextInput(label="ID del Rol", default=str(config_global["rol_organizar_eventos_id"] or ""), max_length=20)
-            async def on_submit(self, i: discord.Interaction):
-                config_global["rol_organizar_eventos_id"] = int(self.v.value.strip()) if self.v.value.strip() else None
-                await i.response.send_message(f"✅ Rol de eventos actualizado.", ephemeral=True)
-        await interaction.response.send_modal(M())
-
-    @discord.ui.button(label="📋 Rol Ejecutar Post.", style=discord.ButtonStyle.secondary, row=1)
-    async def set_rolejecutarpost(self, interaction: discord.Interaction, button: discord.ui.Button):
-        class M(discord.ui.Modal, title="Configurar Rol Ejecutar Postulaciones"):
-            v = discord.ui.TextInput(label="ID del Rol", default=str(config_global["rol_ejecutar_postulaciones_id"] or ""), max_length=20)
-            async def on_submit(self, i: discord.Interaction):
-                config_global["rol_ejecutar_postulaciones_id"] = int(self.v.value.strip()) if self.v.value.strip() else None
-                await i.response.send_message(f"✅ Rol para ejecutar postulaciones actualizado.", ephemeral=True)
-        await interaction.response.send_modal(M())
-
-    @discord.ui.button(label="✅ Rol Aprobar Post.", style=discord.ButtonStyle.secondary, row=1)
-    async def set_rolaprobarpost(self, interaction: discord.Interaction, button: discord.ui.Button):
-        class M(discord.ui.Modal, title="Configurar Rol Aprobar Postulaciones"):
-            v = discord.ui.TextInput(label="ID del Rol", default=str(config_global["rol_aprobar_postulaciones_id"] or ""), max_length=20)
-            async def on_submit(self, i: discord.Interaction):
-                config_global["rol_aprobar_postulaciones_id"] = int(self.v.value.strip()) if self.v.value.strip() else None
-                await i.response.send_message(f"✅ Rol para aprobar postulaciones actualizado.", ephemeral=True)
-        await interaction.response.send_modal(M())
-
-    @discord.ui.button(label="🛡️ Canal Sanciones", style=discord.ButtonStyle.primary, row=2)
-    async def set_canalsancion(self, interaction: discord.Interaction, button: discord.ui.Button):
-        class M(discord.ui.Modal, title="Configurar Canal Sanciones"):
-            v = discord.ui.TextInput(label="ID del Canal", default=str(config_global["canal_sanciones_id"] or ""), max_length=20)
-            async def on_submit(self, i: discord.Interaction):
-                config_global["canal_sanciones_id"] = int(self.v.value.strip()) if self.v.value.strip() else None
-                await i.response.send_message(f"✅ Canal de sanciones actualizado.", ephemeral=True)
-        await interaction.response.send_modal(M())
-
-    @discord.ui.button(label="📢 Canal Sugerencias", style=discord.ButtonStyle.primary, row=2)
-    async def set_canalsug(self, interaction: discord.Interaction, button: discord.ui.Button):
-        class M(discord.ui.Modal, title="Configurar Canal Sugerencias"):
-            v = discord.ui.TextInput(label="ID del Canal", default=str(config_global["canal_sugerencias_id"] or ""), max_length=20)
-            async def on_submit(self, i: discord.Interaction):
-                config_global["canal_sugerencias_id"] = int(self.v.value.strip()) if self.v.value.strip() else None
-                await i.response.send_message(f"✅ Canal de sugerencias actualizado.", ephemeral=True)
-        await interaction.response.send_modal(M())
-
-    @discord.ui.button(label="📋 Canal Global Postulaciones", style=discord.ButtonStyle.success, row=2)
-    async def set_canallogs(self, interaction: discord.Interaction, button: discord.ui.Button):
-        class M(discord.ui.Modal, title="Configurar Canal Global Postulaciones"):
-            v = discord.ui.TextInput(label="ID del Canal", default=str(config_global["canal_postulaciones_id"] or ""), max_length=20)
-            async def on_submit(self, i: discord.Interaction):
-                config_global["canal_postulaciones_id"] = int(self.v.value.strip()) if self.v.value.strip() else None
-                await i.response.send_message(f"✅ Canal global de postulaciones actualizado.", ephemeral=True)
-        await interaction.response.send_modal(M())
-
-
-@client.tree.command(name="confi-general", description="Panel visual en Embed para configurar roles y canales")
-async def confi_general(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.administrator:
-        return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
-
+# ─────────────────────────────── /dado ───────────────────────────────────────
+@tree.command(name="dado", description="Lanza un dado de hasta 16 caras")
+@app_commands.describe(caras="Número de caras (2-16, por defecto 6)")
+async def dado(interaction: discord.Interaction, caras: app_commands.Range[int, 2, 16] = 6):
+    r = random.randint(1, caras)
     embed = discord.Embed(
-        title="⚙️ Panel de Configuración General",
-        description="Haz clic en los botones inferiores para editar cada parámetro individualmente:",
-        color=0x3498DB
+        title=f"🎲 Dado de {caras} caras",
+        description=f"{interaction.user.mention} lanzó el dado y salió **{r}**",
+        color=0xE67E22,
     )
-    embed.add_field(name="📌 Prefijo actual", value=f"`{config_global['prefijo']}`", inline=True)
-    embed.add_field(name="🤖 Anti-Bot", value="Activado" if config_global['antibots_activo'] else "Desactivado", inline=True)
-    embed.add_field(name="👑 Rol Organizar Eventos", value=f"<@&{config_global['rol_organizar_eventos_id']}>" if config_global['rol_organizar_eventos_id'] else "No configurado", inline=True)
-    embed.add_field(name="📋 Rol Ejecutar Postulaciones", value=f"<@&{config_global['rol_ejecutar_postulaciones_id']}>" if config_global['rol_ejecutar_postulaciones_id'] else "No configurado", inline=True)
-    embed.add_field(name="✅ Rol Aprobar Postulaciones", value=f"<@&{config_global['rol_aprobar_postulaciones_id']}>" if config_global['rol_aprobar_postulaciones_id'] else "No configurado", inline=True)
-    embed.add_field(name="🛡️️ Canal Sanciones", value=f"<#{config_global['canal_sanciones_id']}>" if config_global['canal_sanciones_id'] else "No configurado", inline=True)
-    embed.add_field(name="📢 Canal Sugerencias", value=f"<#{config_global['canal_sugerencias_id']}>" if config_global['canal_sugerencias_id'] else "No configurado", inline=True)
-    embed.add_field(name="📋 Canal Global Postulaciones", value=f"<#{config_global['canal_postulaciones_id']}>" if config_global['canal_postulaciones_id'] else "No configurado", inline=True)
-
-    await interaction.response.send_message(embed=embed, view=VistaBotonConfigGeneral(), ephemeral=True)
+    await interaction.response.send_message(embed=embed)
 
 
-# ==========================================
-# 📋 SISTEMA DE POSTULACIONES (CON MENSAJES EDITABLES Y VARIABLES)
-# ==========================================
-
-class ModalEditarDecoracionFormulario(discord.ui.Modal):
-    def __init__(self, post_key, cfg):
-        super().__init__(title=f"Decorar: {post_key.upper()}")
-        self.post_key = post_key
-        self.cfg = cfg
-
-        self.titulo_input = discord.ui.TextInput(label="Título del Embed", default=cfg["titulo"], max_length=100)
-        self.desc_input = discord.ui.TextInput(label="Descripción / Texto del Panel", style=discord.TextStyle.paragraph, default=cfg["descripcion"], max_length=1000)
-        self.color_input = discord.ui.TextInput(label="Color Hex (ej: #3498DB)", default=f"#{cfg['color']:06x}", max_length=7)
-        self.aprobado_input = discord.ui.TextInput(label="Mensaje Aprobado (MD)", style=discord.TextStyle.paragraph, default=cfg["msg_aprobado"], max_length=1000)
-        self.rechazado_input = discord.ui.TextInput(label="Mensaje Rechazado (MD)", style=discord.TextStyle.paragraph, default=cfg["msg_rechazado"], max_length=1000)
-
-        self.add_item(self.titulo_input)
-        self.add_item(self.desc_input)
-        self.add_item(self.color_input)
-        self.add_item(self.aprobado_input)
-        self.add_item(self.rechazado_input)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            nuevo_color = int(self.color_input.value.strip().replace("#", ""), 16)
-        except:
-            return await interaction.response.send_message("❌ Color Hex inválido.", ephemeral=True)
-
-        postulaciones_config[self.post_key]["titulo"] = self.titulo_input.value.strip()
-        postulaciones_config[self.post_key]["descripcion"] = self.desc_input.value.strip()
-        postulaciones_config[self.post_key]["color"] = nuevo_color
-        postulaciones_config[self.post_key]["msg_aprobado"] = self.aprobado_input.value.strip()
-        postulaciones_config[self.post_key]["msg_rechazado"] = self.rechazado_input.value.strip()
-
-        await interaction.response.send_message(f"✨ ¡Configuración del panel **{self.post_key.upper()}** actualizada con éxito!", ephemeral=True)
+# ─────────────────────────────── /ppt ────────────────────────────────────────
+OPC = {"piedra": "🪨 Piedra", "papel": "📄 Papel", "tijera": "✂️ Tijera"}
+GANA = {"piedra": "tijera", "papel": "piedra", "tijera": "papel"}
 
 
-class ModalEditarPreguntasFormulario(discord.ui.Modal):
-    def __init__(self, post_key, cfg):
-        super().__init__(title=f"Preguntas: {post_key.upper()}")
-        self.post_key = post_key
-        self.cfg = cfg
+class PPTView(discord.ui.View):
+    def __init__(self, a: discord.User, b: discord.User):
+        super().__init__(timeout=60)
+        self.players = [a.id, b.id]
+        self.picks = {}
+        self.message = None
 
-        self.preguntas_input = discord.ui.TextInput(
-            label="Preguntas (Una por línea)",
-            style=discord.TextStyle.paragraph,
-            default="\n".join(cfg["preguntas"]),
-            max_length=4000
-        )
-        self.add_item(self.preguntas_input)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        nuevas_preguntas = [p.strip() for p in self.preguntas_input.value.split("\n") if p.strip()]
-        if not nuevas_preguntas:
-            return await interaction.response.send_message("❌ Debes incluir al menos una pregunta válida.", ephemeral=True)
-
-        postulaciones_config[self.post_key]["preguntas"] = nuevas_preguntas
-        await interaction.response.send_message(f"📝 ¡Preguntas de **{self.post_key.upper()}** actualizadas con éxito!", ephemeral=True)
-
-
-class VistaSubMenuConfigPost(discord.ui.View):
-    def __init__(self, post_key, cfg):
-        super().__init__(timeout=120)
-        self.post_key = post_key
-        self.cfg = cfg
-
-    @discord.ui.button(label="🎨 Editar Diseño y Mensajes MD", style=discord.ButtonStyle.primary, emoji="✨")
-    async def btn_decorar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ModalEditarDecoracionFormulario(self.post_key, self.cfg))
-
-    @discord.ui.button(label="📝 Editar Preguntas", style=discord.ButtonStyle.success, emoji="📋")
-    async def btn_preguntas(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ModalEditarPreguntasFormulario(self.post_key, self.cfg))
-
-
-class VistaBotonesConfigurarPostulaciones(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=180)
-
-    @discord.ui.button(label="🛡️ Configurar Staff", style=discord.ButtonStyle.primary, row=0)
-    async def btn_staff(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("Selecciona qué deseas editar de **Staff**:", view=VistaSubMenuConfigPost("staff", postulaciones_config["staff"]), ephemeral=True)
-
-    @discord.ui.button(label="🤝 Configurar Alianza", style=discord.ButtonStyle.success, row=0)
-    async def btn_ally(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("Selecciona qué deseas editar de **Alianza**:", view=VistaSubMenuConfigPost("ally", postulaciones_config["ally"]), ephemeral=True)
-
-
-@client.tree.command(name="configurar-postulaciones", description="Edita la decoración, mensajes por MD y preguntas")
-async def configurar_postulaciones(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.administrator:
-        return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
-
-    embed = discord.Embed(
-        title="⚙️ Configurar Formularios de Postulación",
-        description="Variables disponibles: `{usuario}`, `{mencion}`, `{id}`, `{numero}`, `{servidor}`\n\nElige qué formulario deseas configurar:",
-        color=0x3498DB
-    )
-    await interaction.response.send_message(embed=embed, view=VistaBotonesConfigurarPostulaciones(), ephemeral=True)
-
-
-class VistaVeredictoPostulacion(discord.ui.View):
-    def __init__(self, candidato_id: int, tipo_form: str, num_id: int):
-        super().__init__(timeout=None)
-        self.candidato_id = candidato_id
-        self.tipo_form = tipo_form
-        self.num_id = num_id
-
-    @discord.ui.button(label="✅ Aprobar", style=discord.ButtonStyle.success, custom_id="btn_aprobar_post")
-    async def aprobar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        rol_req_id = config_global["rol_aprobar_postulaciones_id"]
-        tiene_permiso = interaction.user.guild_permissions.administrator or interaction.user.guild_permissions.manage_guild
-        if not tiene_permiso and rol_req_id:
-            rol = interaction.guild.get_role(rol_req_id)
-            if rol and rol in interaction.user.roles: tiene_permiso = True
-
-        if not tiene_permiso:
-            return await interaction.response.send_message("❌ No tienes permisos para aprobar postulaciones.", ephemeral=True)
-
-        for child in self.children: child.disabled = True
-        embed = interaction.message.embeds[0]
-        embed.color = discord.Color.green()
-        embed.add_field(name="📌 Veredicto del Staff", value=f"✅ **APROBADA** por {interaction.user.mention}", inline=False)
-        await interaction.message.edit(embed=embed, view=self)
-
-        try:
-            candidato = interaction.guild.get_member(self.candidato_id)
-            if candidato:
-                cfg = postulaciones_config.get(self.tipo_form, {})
-                raw_msg = cfg.get("msg_aprobado", "¡Tu postulación ha sido aprobada!")
-                texto_md = aplicar_variables(raw_msg, candidato, self.num_id)
-                
-                embed_md = discord.Embed(
-                    title="🎉 ¡Postulación Aprobada!",
-                    description=texto_md,
-                    color=discord.Color.green()
-                )
-                await candidato.send(embed=embed_md)
-        except: pass
-
-        await interaction.response.send_message("✅ Postulación aprobada y notificada al candidato.", ephemeral=True)
-
-    @discord.ui.button(label="❌ Rechazar", style=discord.ButtonStyle.danger, custom_id="btn_rechazar_post")
-    async def rechazar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        rol_req_id = config_global["rol_aprobar_postulaciones_id"]
-        tiene_permiso = interaction.user.guild_permissions.administrator or interaction.user.guild_permissions.manage_guild
-        if not tiene_permiso and rol_req_id:
-            rol = interaction.guild.get_role(rol_req_id)
-            if rol and rol in interaction.user.roles: tiene_permiso = True
-
-        if not tiene_permiso:
-            return await interaction.response.send_message("❌ No tienes permisos para rechazar postulaciones.", ephemeral=True)
-
-        for child in self.children: child.disabled = True
-        embed = interaction.message.embeds[0]
-        embed.color = discord.Color.red()
-        embed.add_field(name="📌 Veredicto del Staff", value=f"❌ **RECHAZADA** por {interaction.user.mention}", inline=False)
-        await interaction.message.edit(embed=embed, view=self)
-
-        try:
-            candidato = interaction.guild.get_member(self.candidato_id)
-            if candidato:
-                cfg = postulaciones_config.get(self.tipo_form, {})
-                raw_msg = cfg.get("msg_rechazado", "Tu postulación no ha sido aprobada.")
-                texto_md = aplicar_variables(raw_msg, candidato, self.num_id)
-
-                embed_md = discord.Embed(
-                    title="❌ Resultado de Postulación",
-                    description=texto_md,
-                    color=discord.Color.red()
-                )
-                await candidato.send(embed=embed_md)
-        except: pass
-
-        await interaction.response.send_message("❌ Postulación rechazada y notificada al candidato.", ephemeral=True)
-
-
-class VistaComenzarPostulacion(discord.ui.View):
-    def __init__(self, tipo, num_id, preguntas, miembro_postulado, config_form):
-        super().__init__(timeout=None)
-        self.tipo, self.num_id, self.preguntas, self.miembro_postulado, self.config_form = tipo, num_id, preguntas, miembro_postulado, config_form
-
-    @discord.ui.button(label="🚀 Comenzar Postulación", style=discord.ButtonStyle.success)
-    async def comenzar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.miembro_postulado.id:
-            return await interaction.response.send_message("🔒 **Candado Seguro:** Este formulario es exclusivo para el usuario mencionado y no puedes iniciarlo.", ephemeral=True)
-        
-        await interaction.response.send_message("📬 ¡Cuestionario abierto en tus **Mensajes Privados (MD)**!", ephemeral=True)
-        try:
-            respuestas = []
-            for i, preg in enumerate(self.preguntas):
-                await self.miembro_postulado.send(embed=discord.Embed(title=f"Pregunta {i+1} de {len(self.preguntas)}", description=preg, color=self.config_form['color']))
-                msg = await client.wait_for('message', timeout=120.0, check=lambda m: m.author.id == self.miembro_postulado.id and isinstance(m.channel, discord.DMChannel))
-                respuestas.append((preg, msg.content))
-            
-            txt = "".join([f"**{p}**\n↳ {r}\n\n" for p, r in respuestas])
-            
-            titulo_final = aplicar_variables(self.config_form['titulo'], self.miembro_postulado, self.num_id)
-            embed_final = discord.Embed(
-                title=f"{titulo_final} (#{self.num_id})", 
-                description=f"👤 **Candidato:** {self.miembro_postulado.mention} (`{self.miembro_postulado.id}`)\n\n{txt}", 
-                color=self.config_form['color']
-            )
-            if self.miembro_postulado.display_avatar:
-                embed_final.set_thumbnail(url=self.miembro_postulado.display_avatar.url)
-            
-            canal_id = config_global["canal_postulaciones_id"]
-            destino = interaction.guild.get_channel(canal_id) if canal_id else interaction.channel
-            if destino: 
-                await destino.send(embed=embed_final, view=VistaVeredictoPostulacion(self.miembro_postulado.id, self.tipo, self.num_id))
-            
-            await self.miembro_postulado.send("🎉 ¡Postulación completada y enviada al staff con éxito!")
-        except Exception as e:
-            try:
-                await self.miembro_postulado.send("❌ La postulación ha expirado o ha ocurrido un error.")
-            except: pass
-
-
-@client.tree.command(name="postulacion", description="Envía el panel público de postulación para un usuario")
-async def postulacion(interaction: discord.Interaction, miembro: discord.Member):
-    rol_req_id = config_global["rol_ejecutar_postulaciones_id"]
-    tiene_permiso = interaction.user.guild_permissions.administrator or interaction.user.guild_permissions.manage_guild
-    if not tiene_permiso and rol_req_id:
-        rol = interaction.guild.get_role(rol_req_id)
-        if rol and rol in interaction.user.roles: tiene_permiso = True
-
-    if not tiene_permiso:
-        return await interaction.response.send_message("❌ No tienes permisos para ejecutar este comando de postulación.", ephemeral=True)
-
-    v = discord.ui.View(timeout=60)
-    s = discord.ui.Select(
-        placeholder="Selecciona el formulario...", 
-        options=[
-            discord.SelectOption(label="🛡️️ Postulación Staff", value="staff", emoji="📝"),
-            discord.SelectOption(label="🤝 Postulación Alianza", value="ally", emoji="🤝")
+    def estado(self):
+        lineas = [
+            f"<@{p}> — {'✅ ya eligió' if p in self.picks else '⏳ eligiendo...'}"
+            for p in self.players
         ]
-    )
-    
-    async def cb(i):
-        tipo_sel = s.values[0]
-        cfg = postulaciones_config.get(tipo_sel, {})
-        config_global["contador_postulaciones"] += 1
-        num_id = config_global["contador_postulaciones"]
-        
-        titulo_panel = aplicar_variables(cfg['titulo'], miembro, num_id)
-        desc_panel = aplicar_variables(cfg['descripcion'], miembro, num_id)
-
-        embed_panel = discord.Embed(
-            title=titulo_panel,
-            description=desc_panel,
-            color=cfg['color']
+        return discord.Embed(
+            title="🪨📄✂️ Piedra, Papel o Tijera",
+            description="\n".join(lineas) + "\n\nLas elecciones son secretas hasta que ambos elijan.",
+            color=0x3498DB,
         )
-        if miembro.display_avatar:
-            embed_panel.set_thumbnail(url=miembro.display_avatar.url)
 
-        await i.response.send_message(content=f"📋 Panel de postulación para {miembro.mention}:", embed=embed_panel, view=VistaComenzarPostulacion(tipo_sel, num_id, cfg["preguntas"], miembro, cfg))
+    async def elegir(self, interaction: discord.Interaction, pick: str):
+        uid = interaction.user.id
+        if uid not in self.players:
+            return await interaction.response.send_message("No participas en esta partida.", ephemeral=True)
+        if uid in self.picks:
+            return await interaction.response.send_message("Ya elegiste, espera al otro jugador.", ephemeral=True)
 
-    s.callback = cb
-    v.add_item(s)
-    await interaction.response.send_message(embed=discord.Embed(title="📋 Menú de Postulaciones", description=f"Selecciona el formulario para {miembro.mention}:"), view=v, ephemeral=True)
+        self.picks[uid] = pick
+        if len(self.picks) < 2:
+            await interaction.response.send_message(
+                f"Elegiste {OPC[pick]}. Esperando al otro jugador...", ephemeral=True
+            )
+            return await self.message.edit(embed=self.estado())
 
+        a, b = self.players
+        pa, pb = self.picks[a], self.picks[b]
+        if pa == pb:
+            res = "🤝 **¡Empate!**"
+        elif GANA[pa] == pb:
+            res = f"🏆 Gana <@{a}>"
+        else:
+            res = f"🏆 Gana <@{b}>"
+        embed = discord.Embed(
+            title="🪨📄✂️ Resultado",
+            description=f"<@{a}>: {OPC[pa]}\n<@{b}>: {OPC[pb]}\n\n{res}",
+            color=0x2ECC71,
+        )
+        for c in self.children:
+            c.disabled = True
+        self.stop()
+        await interaction.response.edit_message(content=None, embed=embed, view=self)
 
-# ==========================================
-# 🛡️ SANCIONES Y MODERACIÓN CON PROTECCIÓN DE JERARQUÍA
-# ==========================================
+    async def on_timeout(self):
+        for c in self.children:
+            c.disabled = True
+        if self.message:
+            await self.message.edit(
+                content=None,
+                embed=discord.Embed(description="⌛ Partida cancelada por inactividad.", color=0x95A5A6),
+                view=self,
+            )
 
-@client.tree.command(name="ban", description="Banea a un miembro del servidor")
-async def ban(interaction: discord.Interaction, miembro: discord.Member, razon: str = "Sin motivo"):
-    if not interaction.user.guild_permissions.ban_members: 
-        return await interaction.response.send_message("❌ No tienes permisos para banear miembros.", ephemeral=True)
-    if not verificar_jerarquia(interaction.user, miembro):
-        return await interaction.response.send_message("❌ No puedes sancionar a un usuario con un rango igual o superior al tuyo.", ephemeral=True)
+    @discord.ui.button(label="Piedra", emoji="🪨", style=discord.ButtonStyle.primary)
+    async def piedra(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.elegir(interaction, "piedra")
 
-    await miembro.ban(reason=razon)
-    base_datos_sanciones[miembro.id].append(f"🔨 Ban - {razon}")
-    
-    embed_log = discord.Embed(title="🔨 Sanción: Ban", description=f"**Usuario:** {miembro.mention}\n**Moderador:** {interaction.user.mention}\n**Razón:** {razon}", color=discord.Color.red())
-    await registrar_log_sancion(interaction.guild, embed_log)
-    await interaction.response.send_message(f"🔨 {miembro.mention} ha sido baneado.")
+    @discord.ui.button(label="Papel", emoji="📄", style=discord.ButtonStyle.primary)
+    async def papel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.elegir(interaction, "papel")
 
-
-@client.tree.command(name="unban", description="Desbanea a un usuario por su ID o Nombre")
-async def unban(interaction: discord.Interaction, usuario_id: str, razon: str = "Sin motivo"):
-    if not interaction.user.guild_permissions.ban_members: 
-        return await interaction.response.send_message("❌ No tienes permisos para desbanear.", ephemeral=True)
-    async for entry in interaction.guild.bans():
-        if str(entry.user.id) == usuario_id.strip() or entry.user.name.lower() == usuario_id.strip().lower():
-            await interaction.guild.unban(entry.user, reason=razon)
-            return await interaction.response.send_message(f"🔓 Usuario **{entry.user}** desbaneado correctamente.")
-    await interaction.response.send_message("❌ No se encontró ningún usuario baneado con ese ID o nombre.", ephemeral=True)
-
-
-@client.tree.command(name="kick", description="Expulsa a un miembro del servidor")
-async def kick(interaction: discord.Interaction, miembro: discord.Member, razon: str = "Sin motivo"):
-    if not interaction.user.guild_permissions.kick_members: 
-        return await interaction.response.send_message("❌ No tienes permisos para expulsar miembros.", ephemeral=True)
-    if not verificar_jerarquia(interaction.user, miembro):
-        return await interaction.response.send_message("❌ No puedes expulsar a un usuario con un rango igual o superior al tuyo.", ephemeral=True)
-
-    await miembro.kick(reason=razon)
-    base_datos_sanciones[miembro.id].append(f"👢 Kick - {razon}")
-    
-    embed_log = discord.Embed(title="👢 Sanción: Kick", description=f"**Usuario:** {miembro.mention}\n**Moderador:** {interaction.user.mention}\n**Razón:** {razon}", color=discord.Color.orange())
-    await registrar_log_sancion(interaction.guild, embed_log)
-    await interaction.response.send_message(f"👢 {miembro.mention} ha sido expulsado.")
-
-
-@client.tree.command(name="mute", description="Silencia temporalmente a un miembro (Timeout)")
-async def mute(interaction: discord.Interaction, miembro: discord.Member, segundos: int, razon: str = "Sin motivo"):
-    if not interaction.user.guild_permissions.moderate_members: 
-        return await interaction.response.send_message("❌ No tienes permisos para silenciar miembros.", ephemeral=True)
-    if not verificar_jerarquia(interaction.user, miembro):
-        return await interaction.response.send_message("❌ No puedes silenciar a un usuario con un rango igual o superior al tuyo.", ephemeral=True)
-
-    await miembro.timeout(discord.utils.utcnow() + discord.Timedelta(seconds=segundos), reason=razon)
-    base_datos_sanciones[miembro.id].append(f"🔇 Mute ({segundos}s) - {razon}")
-    
-    embed_log = discord.Embed(title="🔇 Sanción: Timeout (Mute)", description=f"**Usuario:** {miembro.mention}\n**Duración:** {segundos}s\n**Moderador:** {interaction.user.mention}\n**Razón:** {razon}", color=discord.Color.gold())
-    await registrar_log_sancion(interaction.guild, embed_log)
-    await interaction.response.send_message(f"🔇 {miembro.mention} ha sido silenciado por {segundos} segundos.")
+    @discord.ui.button(label="Tijera", emoji="✂️", style=discord.ButtonStyle.primary)
+    async def tijera(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.elegir(interaction, "tijera")
 
 
-@client.tree.command(name="unmute", description="Quita el silencio a un miembro")
-async def unmute(interaction: discord.Interaction, miembro: discord.Member):
-    if not interaction.user.guild_permissions.moderate_members: 
-        return await interaction.response.send_message("❌ No tienes permisos.", ephemeral=True)
-    await miembro.timeout(None)
-    await interaction.response.send_message(f"🔊 Se ha retirado el silencio a {miembro.mention}.")
+@tree.command(name="ppt", description="Juega piedra, papel o tijera contra otra persona")
+@app_commands.describe(oponente="Con quién quieres jugar")
+async def ppt(interaction: discord.Interaction, oponente: discord.User):
+    if oponente.bot or oponente.id == interaction.user.id:
+        return await interaction.response.send_message(
+            "Elige a otra persona (ni un bot ni tú mismo).", ephemeral=True
+        )
+    view = PPTView(interaction.user, oponente)
+    await interaction.response.send_message(
+        content=f"{oponente.mention}, {interaction.user.mention} te retó.",
+        embed=view.estado(),
+        view=view,
+    )
+    view.message = await interaction.original_response()
 
 
-@client.tree.command(name="warn", description="Advierte formalmente a un miembro")
-async def warn(interaction: discord.Interaction, miembro: discord.Member, razon: str):
-    if not interaction.user.guild_permissions.moderate_members: 
-        return await interaction.response.send_message("❌ No tienes permisos para advertir miembros.", ephemeral=True)
-    if not verificar_jerarquia(interaction.user, miembro):
-        return await interaction.response.send_message("❌ No puedes advertir a un usuario con un rango igual o superior al tuyo.", ephemeral=True)
-
-    base_datos_sanciones[miembro.id].append(f"⚠️ Warn - {razon}")
-    
-    try: 
-        await miembro.send(embed=discord.Embed(title="⚠️ Advertencia", description=f"Has recibido una advertencia en **{interaction.guild.name}**.\n**Razón:** {razon}", color=discord.Color.gold()))
-    except: pass
-    
-    embed_log = discord.Embed(title="⚠️ Sanción: Warn", description=f"**Usuario:** {miembro.mention}\n**Moderador:** {interaction.user.mention}\n**Razón:** {razon}", color=discord.Color.gold())
-    await registrar_log_sancion(interaction.guild, embed_log)
-    await interaction.response.send_message(f"⚠️ {miembro.mention} ha sido advertido.")
+# ───────────────────────────── Sugerencias ───────────────────────────────────
+def puede_moderar_sug(member: discord.Member) -> bool:
+    c = cfg(member.guild.id)["sug"]
+    return member.guild_permissions.manage_guild or any(r.id in c["roles"] for r in member.roles)
 
 
-@client.tree.command(name="historial", description="Muestra el historial de sanciones de un miembro")
-async def historial(interaction: discord.Interaction, miembro: discord.Member):
-    if not interaction.user.guild_permissions.moderate_members: 
-        return await interaction.response.send_message("❌ No tienes permisos.", ephemeral=True)
-    s = base_datos_sanciones.get(miembro.id, [])
-    if not s: 
-        return await interaction.response.send_message(f"🛡️ El usuario {miembro.mention} tiene el historial limpio.", ephemeral=True)
-    
-    embed = discord.Embed(title=f"📜 Historial de Sanciones: {miembro.display_name}", description="\n".join([f"• {x}" for x in s]), color=discord.Color.red())
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+async def crear_sugerencia(guild, user, texto, imagen=None) -> bool:
+    c = cfg(guild.id)["sug"]
+    canal = guild.get_channel(c["canal"]) if c["canal"] else None
+    if canal is None:
+        return False
+    embed = discord.Embed(
+        title="💡 Nueva sugerencia",
+        description=texto or "*(sin texto)*",
+        color=0xF1C40F,
+        timestamp=discord.utils.utcnow(),
+    )
+    embed.set_author(name=user.name, icon_url=user.display_avatar.url)
+    embed.add_field(name="Estado", value="⏳ Pendiente")
+    if imagen:
+        embed.set_image(url=imagen)
+    msg = await canal.send(embed=embed, view=SugerenciaView())
+    c["items"][str(msg.id)] = user.id
+    save()
+    return True
 
 
-# ==========================================
-# 📅 SISTEMA DE EVENTOS (CON OPCIONES OPCIONALES)
-# ==========================================
+class NotaModal(discord.ui.Modal):
+    nota = discord.ui.TextInput(
+        label="Nota (opcional)", style=discord.TextStyle.paragraph, required=False, max_length=1000
+    )
 
-class VistaEventoParticipar(discord.ui.View):
+    def __init__(self, aprobado: bool, mensaje: discord.Message):
+        super().__init__(title="Aprobar sugerencia" if aprobado else "Rechazar sugerencia")
+        self.aprobado = aprobado
+        self.mensaje = mensaje
+
+    async def on_submit(self, interaction: discord.Interaction):
+        nota = self.nota.value or "Sin nota."
+        embed = self.mensaje.embeds[0].copy()
+        embed.color = 0x2ECC71 if self.aprobado else 0xE74C3C
+        embed.clear_fields()
+        embed.add_field(name="Estado", value="✅ Aprobada" if self.aprobado else "❌ Rechazada", inline=False)
+        embed.add_field(name="Revisada por", value=interaction.user.mention, inline=True)
+        embed.add_field(name="Nota", value=nota, inline=False)
+        await interaction.response.edit_message(embed=embed, view=None)
+
+        autor_id = cfg(interaction.guild.id)["sug"]["items"].get(str(self.mensaje.id))
+        if autor_id:
+            try:
+                user = await client.fetch_user(autor_id)
+                dm = discord.Embed(
+                    title=f"Tu sugerencia fue {'aprobada ✅' if self.aprobado else 'rechazada ❌'}",
+                    description=embed.description,
+                    color=embed.color,
+                )
+                dm.add_field(name="Staff", value=interaction.user.name, inline=True)
+                dm.add_field(name="Nota", value=nota, inline=False)
+                await user.send(embed=dm)
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+
+
+class SugerenciaView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="🎉 Participar", style=discord.ButtonStyle.success, custom_id="btn_participar_evento_rt")
-    async def participar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        msg_id = interaction.message.id
-        if msg_id not in eventos_activos:
-            return await interaction.response.send_message("❌ Este evento ya no está activo.", ephemeral=True)
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if not puede_moderar_sug(interaction.user):
+            await interaction.response.send_message("❌ No tienes permiso para esto.", ephemeral=True)
+            return False
+        return True
 
-        datos = eventos_activos[msg_id]
-        participantes = datos["participantes"]
+    @discord.ui.button(label="Aprobar", style=discord.ButtonStyle.success, custom_id="sug:ok")
+    async def aprobar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(NotaModal(True, interaction.message))
 
-        if interaction.user.id in participantes:
-            participantes.remove(interaction.user.id)
-            estado_msj = "❌ Te has **retirado** del evento."
-        else:
-            participantes.add(interaction.user.id)
-            estado_msj = "✅ ¡Te has **unido** exitosamente al evento!"
-
-        guild = interaction.guild
-        nombres = [guild.get_member(uid).display_name for uid in participantes if guild.get_member(uid)]
-        lista_nombres_str = ", ".join(nombres) if nombres else "Nadie apuntado aún"
-
-        embed_viejo = interaction.message.embeds[0]
-        embed_nuevo = discord.Embed(
-            title=embed_viejo.title,
-            description=embed_viejo.description,
-            color=embed_viejo.color
-        )
-        for field in embed_viejo.fields:
-            if "Participantes" not in field.name:
-                embed_nuevo.add_field(name=field.name, value=field.value, inline=field.inline)
-        
-        embed_nuevo.add_field(name=f"👥 Participantes ({len(participantes)})", value=lista_nombres_str, inline=False)
-        if embed_viejo.image.url:
-            embed_nuevo.set_image(url=embed_viejo.image.url)
-
-        await interaction.message.edit(embed=embed_nuevo)
-        await interaction.response.send_message(estado_msj, ephemeral=True)
+    @discord.ui.button(label="Rechazar", style=discord.ButtonStyle.danger, custom_id="sug:no")
+    async def rechazar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(NotaModal(False, interaction.message))
 
 
-@client.tree.command(name="organizar-evento", description="Organiza un evento interactivo con parámetros opcionales")
-@app_commands.describe(
-    nombre="Nombre del evento", 
-    canal="Canal donde se publicará", 
-    texto="Descripción del evento (Opcional)", 
-    organizadores="Nombres de los organizadores (Opcional)",
-    tiempo="¿Cuándo empieza? (Opcional)",
-    ganadores="Número de ganadores (Opcional)",
-    mencion="Rol o mención a avisar (Opcional)"
-)
-async def organizar_evento(
-    interaction: discord.Interaction, 
-    nombre: str, 
-    canal: discord.TextChannel, 
-    texto: str = "¡Participa en nuestro evento!", 
-    organizadores: str = "Staff", 
-    tiempo: str = "Pronto", 
-    ganadores: str = "Por definir", 
-    mencion: str = ""
-):
-    rol_req_id = config_global["rol_organizar_eventos_id"]
-    tiene_permiso = interaction.user.guild_permissions.manage_events or interaction.user.guild_permissions.administrator
-    if not tiene_permiso and rol_req_id:
-        rol = interaction.guild.get_role(rol_req_id)
-        if rol and rol in interaction.user.roles: tiene_permiso = True
-
-    if not tiene_permiso:
-        return await interaction.response.send_message("❌ No tienes permisos para organizar eventos.", ephemeral=True)
-
-    embed = discord.Embed(title=f"📅 ¡Evento: {nombre}!", description=texto, color=0xE91E63)
-    embed.add_field(name="👑 Organizadores", value=organizadores, inline=False)
-    embed.add_field(name="⏰ Inicio", value=tiempo, inline=True)
-    embed.add_field(name="🏆 Ganadores", value=ganadores, inline=True)
-    embed.add_field(name="👥 Participantes (0)", value="Nadie apuntado aún", inline=False)
-    embed.set_footer(text="Haz clic en el botón inferior para unirte en tiempo real.")
-
-    mensaje = await canal.send(content=mencion if mencion else "", embed=embed, view=VistaEventoParticipar())
-
-    eventos_activos[mensaje.id] = {
-        "nombre": nombre,
-        "organizadores": organizadores,
-        "tiempo": tiempo,
-        "ganadores": ganadores,
-        "participantes": set(),
-        "canal_id": canal.id
-    }
-
-    await interaction.response.send_message(f"✅ ¡Evento **{nombre}** publicado en {canal.mention}!", ephemeral=True)
+@tree.command(name="sugerencias", description="Envía una sugerencia al servidor")
+@app_commands.describe(texto="Tu sugerencia")
+async def sugerencias(interaction: discord.Interaction, texto: app_commands.Range[str, 1, 2000]):
+    ok = await crear_sugerencia(interaction.guild, interaction.user, texto)
+    await interaction.response.send_message(
+        "✅ Sugerencia enviada."
+        if ok
+        else "⚠️ Aún no hay canal de sugerencias. Un admin debe configurarlo en `/configuracion`.",
+        ephemeral=True,
+    )
 
 
-class SelectorIniciarEvento(discord.ui.Select):
-    def __init__(self, eventos: dict):
-        options = []
-        for msg_id, datos in eventos.items():
-            options.append(discord.SelectOption(label=datos["nombre"][:100], description=f"Organizadores: {datos['organizadores'][:50]}", value=str(msg_id)))
-        super().__init__(placeholder="Selecciona el evento que deseas iniciar...", options=options)
+# ───────────────────────────── /configuracion ────────────────────────────────
+SECCIONES = {
+    "sugerencias": ("💡", "Sugerencias", "Canal y roles que aprueban"),
+    "postulaciones": ("📝", "Postulaciones", "Formularios, embeds y canal"),
+    "eventos": ("🎉", "Eventos", "Roles y embed de eventos"),
+    "seguridad": ("🛡️", "Seguridad", "Anti-Bot, Anti-Raid, Anti-Spam, Whitelist"),
+    "moderacion": ("🔨", "Moderación", "Sanciones, casos y registros"),
+    "juegos": ("🎮", "Juegos", "Editar embeds de los juegos"),
+}
+
+
+def home_embed():
+    lista = "\n".join(f"{e} **{n}** — {d}" for e, n, d in SECCIONES.values())
+    return discord.Embed(
+        title="⚙️ Configuración de Nexus",
+        description=f"¡Bienvenido al panel! Elige en el menú qué quieres configurar:\n\n{lista}",
+        color=0x5865F2,
+    )
+
+
+def sug_embed(guild_id):
+    c = cfg(guild_id)["sug"]
+    embed = discord.Embed(title="💡 Configurar sugerencias", color=0xF1C40F)
+    embed.add_field(name="Canal", value=f"<#{c['canal']}>" if c["canal"] else "No configurado", inline=True)
+    embed.add_field(
+        name="Roles que aprueban/rechazan",
+        value=" ".join(f"<@&{r}>" for r in c["roles"]) or "Solo quienes tengan *Gestionar servidor*",
+        inline=True,
+    )
+    return embed
+
+
+class AdminView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=600)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
+            return False
+        return True
+
+
+class HomeView(AdminView):
+    def __init__(self):
+        super().__init__()
+        self.add_item(Menu())
+
+
+class Menu(discord.ui.Select):
+    def __init__(self):
+        opciones = [
+            discord.SelectOption(label=n, value=k, emoji=e, description=d)
+            for k, (e, n, d) in SECCIONES.items()
+        ]
+        super().__init__(placeholder="¿Qué quieres configurar?", options=opciones)
 
     async def callback(self, interaction: discord.Interaction):
-        msg_id = int(self.values[0])
-        if msg_id not in eventos_activos:
-            return await interaction.response.send_message("❌ Este evento ya no está disponible.", ephemeral=True)
-        
-        datos = eventos_activos[msg_id]
-        guild = interaction.guild
-        canal = guild.get_channel(datos["canal_id"])
-
-        class ModalInicioPing(discord.ui.Modal, title="Iniciar Evento - Mención"):
-            mencion_input = discord.ui.TextInput(label="Rol o Mención (ej: @everyone)", default="@everyone", required=True, max_length=50)
-
-            async def on_submit(self, i2: discord.Interaction):
-                ping = self.mencion_input.value
-                if canal:
-                    embed_inicio = discord.Embed(
-                        title=f"🚨 ¡EL EVENTO '{datos['nombre']}' VA A DAR INICIO!",
-                        description=f"¡El evento organizado por **{datos['organizadores']}** comienza ahora mismo!",
-                        color=discord.Color.gold()
-                    )
-                    await canal.send(content=ping, embed=embed_inicio)
-                    await i2.response.send_message(f"✅ ¡Anuncio enviado en {canal.mention}!", ephemeral=True)
-
-        await interaction.response.send_modal(ModalInicioPing())
-
-
-class VistaSelectorEventos(discord.ui.View):
-    def __init__(self, eventos: dict):
-        super().__init__(timeout=30)
-        self.add_item(SelectorIniciarEvento(eventos))
-
-
-@client.tree.command(name="iniciar-evento", description="Selecciona un evento activo y envía el aviso de inicio")
-async def iniciar_evento(interaction: discord.Interaction):
-    rol_req_id = config_global["rol_organizar_eventos_id"]
-    tiene_permiso = interaction.user.guild_permissions.manage_events or interaction.user.guild_permissions.administrator
-    if not tiene_permiso and rol_req_id:
-        rol = interaction.guild.get_role(rol_req_id)
-        if rol and rol in interaction.user.roles: tiene_permiso = True
-
-    if not tiene_permiso:
-        return await interaction.response.send_message("❌ No tienes permisos.", ephemeral=True)
-    if not eventos_activos:
-        return await interaction.response.send_message("🛡️ No hay eventos activos.", ephemeral=True)
-
-    await interaction.response.send_message(embed=discord.Embed(title="🚀 Iniciar Evento", description="Selecciona en el menú desplegable:", color=0x3498DB), view=VistaSelectorEventos(eventos_activos), ephemeral=True)
-
-
-@client.tree.command(name="lista-eventos", description="Muestra todos los eventos activos")
-async def lista_eventos(interaction: discord.Interaction):
-    if not eventos_activos:
-        return await interaction.response.send_message("🛡️ No hay eventos activos.", ephemeral=True)
-
-    embed = discord.Embed(title="📊 Lista de Eventos Activos", color=0x9B59B6)
-    guild = interaction.guild
-
-    for msg_id, datos in eventos_activos.items():
-        canal = guild.get_channel(datos["canal_id"])
-        nombres = [guild.get_member(uid).display_name for uid in datos["participantes"] if guild.get_member(uid)]
-        lista_str = ", ".join(nombres) if nombres else "Nadie apuntado"
-        
-        embed.add_field(
-            name=f"📌 {datos['nombre']} ({canal.mention if canal else 'Canal'})",
-            value=f"**Organizadores:** {datos['organizadores']}\n**Participantes ({len(datos['participantes'])}):** {lista_str}",
-            inline=False
+        k = self.values[0]
+        if k == "sugerencias":
+            return await interaction.response.edit_message(embed=sug_embed(interaction.guild.id), view=SugView())
+        e, n, _ = SECCIONES[k]
+        embed = discord.Embed(
+            title=f"{e} {n}", description="🚧 Esta sección se agregará en la siguiente fase.", color=0x95A5A6
         )
+        await interaction.response.edit_message(embed=embed, view=BackView())
+
+
+class BackView(AdminView):
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=home_embed(), view=HomeView())
+
+
+class SugView(AdminView):
+    @discord.ui.select(
+        cls=discord.ui.ChannelSelect,
+        channel_types=[discord.ChannelType.text],
+        placeholder="Elige el canal de sugerencias",
+    )
+    async def canal(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        cfg(interaction.guild.id)["sug"]["canal"] = select.values[0].id
+        save()
+        await interaction.response.edit_message(embed=sug_embed(interaction.guild.id), view=self)
+
+    @discord.ui.select(
+        cls=discord.ui.RoleSelect,
+        min_values=0,
+        max_values=10,
+        placeholder="Roles que aprueban/rechazan",
+    )
+    async def roles(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        cfg(interaction.guild.id)["sug"]["roles"] = [r.id for r in select.values]
+        save()
+        await interaction.response.edit_message(embed=sug_embed(interaction.guild.id), view=self)
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=home_embed(), view=HomeView())
+
+
+@tree.command(name="configuracion", description="Panel de configuración de Nexus")
+@app_commands.default_permissions(administrator=True)
+@app_commands.guild_only()
+async def configuracion(interaction: discord.Interaction):
+    await interaction.response.send_message(embed=home_embed(), view=HomeView(), ephemeral=True)
+
+
+# ─────────────────────────────────── /help ───────────────────────────────────
+@tree.command(name="help", description="Cómo usar y configurar Nexus")
+async def help_cmd(interaction: discord.Interaction):
+    embed = discord.Embed(title="📖 Ayuda de Nexus", description="Guía rápida para configurar el bot:", color=0x5865F2)
+    embed.add_field(name="1️⃣ Empieza aquí", value="Un admin usa `/configuracion` y elige una sección del menú.", inline=False)
+    embed.add_field(
+        name="💡 Sugerencias",
+        value="En `/configuracion → Sugerencias` elige el canal y los roles que aprueban. "
+        "Cada mensaje en ese canal se vuelve un embed con botones Aprobar/Rechazar.",
+        inline=False,
+    )
+    embed.add_field(
+        name="🎮 Juegos",
+        value="`/ppt @usuario` — piedra, papel o tijera (ambos eligen en secreto)\n`/dado [caras]` — dado de 2 a 16 caras",
+        inline=False,
+    )
+    embed.add_field(name="🚧 Próximamente", value="Eventos, postulaciones, seguridad, moderación y adivina la palabra.", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-# ==========================================
-# 🎮 JUEGOS Y AYUDA
-# ==========================================
+# ───────────────────── Mensajes: sugerencias + presentación ──────────────────
+@client.event
+async def on_message(m: discord.Message):
+    if m.author.bot or not m.guild:
+        return
 
-@client.tree.command(name="help", description="Centro de ayuda")
-async def help_command(interaction: discord.Interaction):
-    embed = discord.Embed(title="✨ Centro de Ayuda", description=f"Prefijo: `{config_global['prefijo']}`", color=0x5865F2)
-    embed.add_field(name="⚙ Módulos Activos", value="• `/confi-general` • `/configurar-postulaciones` • `/postulacion`\n• `/organizar-evento` • `/iniciar-evento` • `/lista-eventos`\n• `/ban` • `/kick` • `/mute` • `/warn` • `/historial`\n• `/juegos` • `/dado` • `/trivia`", inline=False)
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    # Canal de sugerencias: cada mensaje se convierte en embed
+    c = cfg(m.guild.id)["sug"]
+    if c["canal"] and m.channel.id == c["canal"]:
+        img = next((a.url for a in m.attachments if a.content_type and a.content_type.startswith("image/")), None)
+        if m.content or img:
+            if await crear_sugerencia(m.guild, m.author, m.content, img):
+                try:
+                    await m.delete()
+                except discord.HTTPException:
+                    pass
+        return
 
-
-@client.tree.command(name="juegos", description="Menú de juegos")
-async def juegos(interaction: discord.Interaction):
-    await interaction.response.send_message(embed=discord.Embed(title=config_global["embed_juegos_titulo"], description=config_global["embed_juegos_desc"], color=config_global["embed_juegos_color"]))
-
-
-@client.tree.command(name="dado", description="Lanza un dado")
-async def dado(interaction: discord.Interaction, caras: int = 6):
-    await interaction.response.send_message(f"🎲 Sacaste: **{random.randint(1, caras)}**")
-
-
-@client.tree.command(name="trivia", description="Trivia pública")
-async def trivia(interaction: discord.Interaction):
-    t = random.choice(BANCO_TRIVIA)
-    embed = discord.Embed(title=f"🧠 Trivia: {t['cat']}", description=f"**{t['p']}**", color=0x3498DB)
-    embed.set_image(url=t["img"])
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    # Presentación: SOLO con mención directa (no si es respuesta a un mensaje)
+    if (
+        m.reference is None
+        and not m.mention_everyone
+        and m.content.strip() in (f"<@{client.user.id}>", f"<@!{client.user.id}>")
+    ):
+        embed = discord.Embed(
+            title="👋 ¡Hola, soy Nexus!",
+            description="Soy un bot multifuncional: juegos, eventos, postulaciones, sugerencias, "
+            "seguridad y moderación.\n\n• Usa `/help` para ver cómo configurarme\n"
+            "• Los administradores usan `/configuracion`",
+            color=0x5865F2,
+        )
+        embed.set_thumbnail(url=client.user.display_avatar.url)
+        await m.reply(embed=embed, mention_author=False)
 
 
 client.run(os.environ['DISCORD_TOKEN'])
