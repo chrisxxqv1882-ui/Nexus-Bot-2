@@ -5,6 +5,9 @@ import io
 import re
 import time
 import unicodedata
+import inspect
+import typing
+import traceback
 from collections import deque
 import random
 from typing import Optional
@@ -57,6 +60,8 @@ def cfg(guild_id):
         "activos": {},
         "style": {"titulo": "🎉 Nuevo evento", "color": "5865F2", "imagen": None, "miniatura": None, "footer": None},
     })
+    g.setdefault("prefijo", "!")  # prefijo para usar los comandos con texto (!comando)
+    g["tk"].setdefault("panel_roles", [])  # roles que pueden usar /ticket-panel
     return g
 
 
@@ -2549,6 +2554,12 @@ def tk_es_staff(member, t) -> bool:
     return member.guild_permissions.administrator or any(r.id in t["roles"] for r in member.roles)
 
 
+def puede_panel_tk(member) -> bool:
+    """Administradores o roles elegidos en /configuracion → Tickets pueden enviar el panel."""
+    t = cfg(member.guild.id)["tk"]
+    return member.guild_permissions.administrator or any(r.id in t.get("panel_roles", []) for r in member.roles)
+
+
 async def abrir_ticket(interaction: discord.Interaction, categoria: str):
     g = interaction.guild
     t = cfg(g.id)["tk"]
@@ -2762,11 +2773,12 @@ class TicketControlView(discord.ui.View):
 
 @tree.command(name="ticket-panel", description="Envía el panel para que abran tickets")
 @app_commands.describe(canal="Canal donde se enviará el panel (por defecto, este)")
-@app_commands.default_permissions(administrator=True)
 @app_commands.guild_only()
 async def ticket_panel(interaction: discord.Interaction, canal: Optional[discord.TextChannel] = None):
-    if not interaction.user.guild_permissions.administrator:
-        return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
+    if not puede_panel_tk(interaction.user):
+        return await interaction.response.send_message(
+            "❌ No tienes permiso para enviar el panel de tickets. "
+            "Un administrador puede darte acceso en `/configuracion → Tickets`.", ephemeral=True)
     t = cfg(interaction.guild.id)["tk"]
     destino = canal or interaction.channel
     try:
@@ -2782,7 +2794,7 @@ SECCIONES = {
     "sugerencias": ("💡", "Sugerencias", "Canal y roles que aprueban"),
     "postulaciones": ("📝", "Postulaciones", "Formularios, embeds y canal"),
     "eventos": ("🎉", "Eventos", "Roles y embed de eventos"),
-    "seguridad": ("🛡️", "Seguridad", "Anti-Bot, Anti-Raid, Anti-Spam, Whitelist"),
+    "seguridad": ("🛡️", "Seguridad", "Solo el dueño: Anti-Bot, Anti-Raid, Anti-Spam, Whitelist"),
     "moderacion": ("🔨", "Moderación", "Sanciones, casos y registros"),
     "juegos": ("🎮", "Juegos", "Editar embeds de los juegos"),
     "tickets": ("🎫", "Tickets", "Canales privados de soporte"),
@@ -2822,6 +2834,54 @@ class AdminView(discord.ui.View):
         return True
 
 
+_ALERTAS_SEG = {}  # (servidor, usuario) -> última vez que se avisó al dueño
+
+
+async def alertar_intento_seguridad(interaction: discord.Interaction, donde: str):
+    """Avisa por MD al dueño cuando alguien que NO es el dueño intenta editar la seguridad."""
+    guild, user = interaction.guild, interaction.user
+    clave = (guild.id, user.id)
+    ahora = time.monotonic()
+    if ahora - _ALERTAS_SEG.get(clave, -999.0) < 30:  # evita llenar de MDs al dueño si insiste
+        return
+    _ALERTAS_SEG[clave] = ahora
+    embed = discord.Embed(
+        title="🚨 Intento de editar la seguridad",
+        description=f"{user.mention} (`{user}` · `{user.id}`) intentó modificar la configuración de seguridad "
+        f"de **{guild.name}** y fue bloqueado.",
+        color=0xE74C3C,
+    )
+    embed.add_field(name="Dónde", value=donde, inline=True)
+    canal = interaction.channel
+    embed.add_field(name="Canal", value=getattr(canal, "mention", "—"), inline=True)
+    embed.add_field(name="Cuándo", value=discord.utils.format_dt(discord.utils.utcnow(), "F"), inline=False)
+    embed.set_thumbnail(url=user.display_avatar.url)
+    embed.set_footer(text="Solo el dueño del servidor puede editar la seguridad.")
+    try:
+        dueno = guild.owner or await client.fetch_user(guild.owner_id)
+        await dueno.send(embed=embed)
+    except discord.HTTPException:
+        pass  # el dueño tiene los MD cerrados
+    try:
+        await log_seg(guild, cfg(guild.id)["seg"], "🚨 Intento de editar la seguridad",
+                      f"{user.mention} intentó editar **{donde}** y fue bloqueado.")
+    except Exception:
+        pass
+
+
+class SoloDuenoView(AdminView):
+    """Vista de seguridad: SOLO el dueño del servidor puede usarla. Si otro lo intenta, se avisa al dueño por MD."""
+    nombre_panel = "Panel de seguridad"
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != interaction.guild.owner_id:
+            await interaction.response.send_message(
+                "🔒 Solo el **dueño del servidor** puede editar la seguridad. Ya le avisé de este intento.", ephemeral=True)
+            await alertar_intento_seguridad(interaction, self.nombre_panel)
+            return False
+        return True
+
+
 class HomeView(AdminView):
     def __init__(self):
         super().__init__()
@@ -2847,6 +2907,10 @@ class Menu(discord.ui.Select):
         if k == "juegos":
             return await interaction.response.edit_message(embed=juegos_menu_embed(), view=JuegosMenuView())
         if k == "seguridad":
+            if interaction.user.id != interaction.guild.owner_id:
+                await interaction.response.send_message(
+                    "🔒 Solo el **dueño del servidor** puede editar la seguridad. Ya le avisé de este intento.", ephemeral=True)
+                return await alertar_intento_seguridad(interaction, "Menú de configuración → Seguridad")
             return await interaction.response.edit_message(embed=seg_home_embed(interaction.guild.id), view=SegHomeView())
         if k == "moderacion":
             return await interaction.response.edit_message(embed=mod_home_embed(interaction.guild.id), view=ModHomeView())
@@ -3493,6 +3557,7 @@ def seg_home_embed(gid: int):
     e.add_field(name="💬 Anti-Spam", value=_estado(s["antispam"]["on"]), inline=True)
     e.add_field(name="📃 White-List", value=f"{len(s['wl']['usuarios'])} usuario(s)/bot(s) · {len(s['wl']['roles'])} rol(es)", inline=False)
     e.add_field(name="Canal de registros de seguridad", value=f"<#{s['canal']}>" if s["canal"] else "No configurado", inline=False)
+    e.set_footer(text="🔒 Solo el dueño del servidor puede editar esta sección.")
     return e
 
 
@@ -3582,10 +3647,11 @@ class SegAjustesModal(discord.ui.Modal, title="Ajustes"):
         )
 
 
-class SegPanelView(AdminView):
+class SegPanelView(SoloDuenoView):
     def __init__(self, key: str, gid: int):
         super().__init__()
         self.key = key
+        self.nombre_panel = f"Seguridad → {SEG_INFO[key][0]}"
         a = cfg(gid)["seg"][key]
         self.toggle.label = "Desactivar" if a["on"] else "Activar"
         self.toggle.style = discord.ButtonStyle.danger if a["on"] else discord.ButtonStyle.success
@@ -3652,7 +3718,9 @@ class WLIdModal(discord.ui.Modal, title="Agregar por ID"):
         await interaction.response.edit_message(embed=wl_embed(interaction.guild), view=WLView(interaction.guild))
 
 
-class WLView(AdminView):
+class WLView(SoloDuenoView):
+    nombre_panel = "Seguridad → White-List"
+
     def __init__(self, guild):
         super().__init__()
         wl = cfg(guild.id)["seg"]["wl"]
@@ -3688,7 +3756,9 @@ class WLView(AdminView):
         await interaction.response.edit_message(embed=seg_home_embed(interaction.guild.id), view=SegHomeView())
 
 
-class SegHomeView(AdminView):
+class SegHomeView(SoloDuenoView):
+    nombre_panel = "Seguridad (menú principal)"
+
     @discord.ui.select(
         placeholder="¿Qué quieres configurar?",
         options=[discord.SelectOption(label=n, value=k, emoji=e, description=d) for k, (e, n, d) in SEG_SECCIONES.items()],
@@ -3852,6 +3922,7 @@ def tk_home_embed(gid: int):
     e.add_field(name="Categoría de Discord para los canales", value=f"<#{t['categoria']}>" if t["categoria"] else "Sin categoría (se crean sueltos)", inline=False)
     e.add_field(name="Canal de registros / transcripciones", value=f"<#{t['canal']}>" if t["canal"] else "No configurado", inline=False)
     e.add_field(name="Roles de staff", value=" ".join(f"<@&{r}>" for r in t["roles"]) or "Solo administradores", inline=False)
+    e.add_field(name="Roles que pueden enviar el panel (/ticket-panel)", value=" ".join(f"<@&{r}>" for r in t.get("panel_roles", [])) or "Solo administradores", inline=False)
     e.add_field(name="Tickets abiertos por usuario", value=f"máx. {t['max']}", inline=True)
     e.add_field(name="Tickets abiertos ahora", value=str(len(t["abiertos"])), inline=True)
     e.add_field(name="Categorías del menú", value=", ".join(c["nombre"] for c in t["cats"]), inline=False)
@@ -3997,6 +4068,13 @@ class TkHomeView(AdminView):
         save()
         await interaction.response.edit_message(embed=tk_home_embed(interaction.guild.id), view=TkHomeView())
 
+    @discord.ui.select(cls=discord.ui.RoleSelect, min_values=0, max_values=10,
+                       placeholder="Roles que pueden enviar el panel (/ticket-panel)", row=4)
+    async def roles_panel(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        cfg(interaction.guild.id)["tk"]["panel_roles"] = [r.id for r in select.values]
+        save()
+        await interaction.response.edit_message(embed=tk_home_embed(interaction.guild.id), view=TkHomeView())
+
     @discord.ui.button(label="📋 Categorías", style=discord.ButtonStyle.primary, row=3)
     async def cats(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(embed=tk_cats_embed(interaction.guild.id), view=TkCatsView(interaction.guild.id))
@@ -4081,7 +4159,475 @@ async def help_cmd(interaction: discord.Interaction):
         "Roles y embeds en `/configuracion → Sorteos`.",
         inline=False,
     )
+    p = cfg(interaction.guild_id)["prefijo"] if interaction.guild_id else "!"
+    embed.add_field(
+        name="⌨️ Prefijos (todos los comandos también con texto)",
+        value=f"Escribe `{p}comando`, `nexus comando` o `@Nexus comando`. Ejemplos: `{p}dado 12` · `nexus trivia` · `nexus ayuda`\n"
+        f"`{p}ayuda lista` muestra todos los comandos y `{p}ayuda <comando>` cómo se usa. "
+        f"Un admin cambia el prefijo con `/prefijo` (ahora: `{p}`).",
+        inline=False,
+    )
     await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+# ───────────────────────── Prefijos: comandos con texto ──────────────────────
+# Todos los comandos / también funcionan con texto:  !dado 12 · nexus trivia · @Nexus ayuda
+#  · Prefijo del servidor (por defecto «!», cambia con /prefijo)
+#  · La palabra «nexus»  →  «nexus ayuda»
+#  · Mencionar al bot    →  «@Nexus ayuda»
+# Nota: por texto no existen los mensajes privados (ephemeral): las respuestas privadas se borran solas.
+class PrefijoError(Exception):
+    def __init__(self, mensaje: str, uso: bool = True):
+        super().__init__(mensaje)
+        self.mensaje, self.uso = mensaje, uso
+
+
+ALIAS_PREFIJO = {
+    "config": "configuracion", "configurar": "configuracion", "panel": "configuracion",
+    "tresenraya": "tres-en-raya", "3enraya": "tres-en-raya", "gato": "tres-en-raya", "ttt": "tres-en-raya",
+    "numero": "adivina-el-numero", "adivinanumero": "adivina-el-numero",
+    "palabra": "adivina-la-palabra", "ahorcado": "adivina-la-palabra",
+    "desordenada": "palabra-desordenada", "rps": "ppt", "dice": "dado",
+    "sugerir": "sugerencias", "sugerencia": "sugerencias", "postular": "postulacion",
+    "estado": "postulacion-estado", "banear": "ban", "expulsar": "kick", "advertir": "warn",
+    "silenciar": "mute", "aislar": "mute", "desilenciar": "unmute", "prefix": "prefijo",
+}
+AYUDA_PREFIJO = {"ayuda", "help", "comandos"}
+_MAPA_PFX = {}
+_COOLDOWN_PFX = {}
+_TOKEN_RE = re.compile(r'"([^"]*)"|“([^”]*)”|(\S+)')
+
+
+def _clave(t: str) -> str:
+    return norm(t).replace("-", "").replace("_", "")
+
+
+def _mapa_prefijo():
+    """Construye (una sola vez) el mapa  nombre/alias → comando  con todos los comandos slash."""
+    if _MAPA_PFX:
+        return _MAPA_PFX
+    for c in tree.walk_commands():
+        if isinstance(c, app_commands.Command):
+            _MAPA_PFX[" ".join(_clave(w) for w in c.qualified_name.split())] = c
+    for alias, destino in ALIAS_PREFIJO.items():
+        c = _MAPA_PFX.get(" ".join(_clave(w) for w in destino.split()))
+        if c is not None:
+            _MAPA_PFX.setdefault(_clave(alias), c)
+    return _MAPA_PFX
+
+
+def _tokenizar(texto: str):
+    out = []
+    for mt in _TOKEN_RE.finditer(texto):
+        valor = next(g for g in mt.groups() if g is not None)
+        out.append((valor, mt.start(), mt.end()))
+    return out
+
+
+def _resolver_comando(toks):
+    """→ (tipo, comando_o_grupo, tokens_usados). tipo: 'ayuda' | 'cmd' | 'grupo' | None"""
+    if not toks:
+        return None, None, 0
+    mapa = _mapa_prefijo()
+    a = _clave(toks[0][0])
+    if a in AYUDA_PREFIJO:
+        return "ayuda", None, 1
+    if len(toks) > 1:
+        c = mapa.get(f"{a} {_clave(toks[1][0])}")
+        if c is not None:
+            return "cmd", c, 2
+    c = mapa.get(a)
+    if c is not None:
+        return "cmd", c, 1
+    for g in tree.get_commands():
+        if isinstance(g, app_commands.Group) and _clave(g.name) == a:
+            return "grupo", g, 1
+    return None, None, 0
+
+
+def _uso(cmd, pref: str) -> str:
+    partes = []
+    for prm in cmd.parameters:
+        nombre = ("📎" if prm.type is discord.AppCommandOptionType.attachment else "") + prm.display_name
+        partes.append(f"<{nombre}>" if prm.required else f"[{nombre}]")
+    return f"{pref}{cmd.qualified_name} " + " ".join(partes)
+
+
+def _desenvolver(anot):
+    """Quita Optional[...] de una anotación."""
+    if typing.get_origin(anot) is typing.Union:
+        resto = [a for a in typing.get_args(anot) if a is not type(None)]
+        if len(resto) == 1:
+            return resto[0]
+    return anot
+
+
+async def _opciones_autocompletar(cmd, prm, shim):
+    """Opciones del autocompletado de un parámetro (eventos, sorteos, formularios...)."""
+    try:
+        cb = getattr(cmd, "_parameter_autocomplete", {}).get(prm.name)
+        if cb is None:
+            cand = getattr(getattr(cmd, "_params", {}).get(prm.name), "autocomplete", None)
+            cb = cand if callable(cand) else None
+        if cb is None:
+            return []
+        return list(await cb(shim, "")) or []
+    except Exception:
+        return []
+
+
+def _texto_opciones(opciones) -> str:
+    if not opciones:
+        return ""
+    return "\nOpciones: " + " · ".join(f"`{o.value}` ({o.name})" if str(o.value) != o.name else f"`{o.value}`" for o in opciones[:10])
+
+
+async def _conv_usuario(v, guild, necesita_miembro: bool):
+    mt = re.fullmatch(r"<@!?(\d+)>|(\d{15,22})", v)
+    if not mt:
+        bajo = v.lstrip("@").lower()
+        cand = [mb for mb in guild.members if bajo in (mb.name.lower(), mb.display_name.lower())]
+        if len(cand) == 1:
+            return cand[0]
+        raise PrefijoError(f"No encuentro a «{v}». Menciónalo o usa su ID.")
+    uid = int(mt.group(1) or mt.group(2))
+    miembro = guild.get_member(uid)
+    if miembro is None:
+        try:
+            miembro = await guild.fetch_member(uid)
+        except discord.HTTPException:
+            miembro = None
+    if miembro is not None:
+        return miembro
+    if necesita_miembro:
+        raise PrefijoError("Esa persona no está en el servidor.")
+    try:
+        return await client.fetch_user(uid)
+    except discord.HTTPException:
+        raise PrefijoError("No encontré a ese usuario.")
+
+
+def _conv_canal(v, guild, anot):
+    mt = re.fullmatch(r"<#(\d+)>|(\d{15,22})", v)
+    canal = guild.get_channel(int(mt.group(1) or mt.group(2))) if mt else discord.utils.find(
+        lambda c: c.name.lower() == v.lstrip("#").lower(), guild.channels)
+    if canal is None:
+        raise PrefijoError(f"No encuentro el canal «{v}». Menciónalo con #canal.")
+    if isinstance(anot, type) and issubclass(anot, discord.abc.GuildChannel) and not isinstance(canal, anot):
+        raise PrefijoError(f"{canal.mention} no es un canal del tipo correcto.")
+    return canal
+
+
+def _conv_rol(v, guild):
+    mt = re.fullmatch(r"<@&(\d+)>|(\d{15,22})", v)
+    rol = guild.get_role(int(mt.group(1) or mt.group(2))) if mt else discord.utils.find(
+        lambda r: r.name.lower() == v.lstrip("@").lower(), guild.roles)
+    if rol is None:
+        raise PrefijoError(f"No encuentro el rol «{v}». Menciónalo con @rol.")
+    return rol
+
+
+def _conv_opcion(v, prm, es_choice: bool):
+    nv = norm(v)
+    dur = parse_duracion(v) if all(isinstance(c.value, int) for c in prm.choices) else None
+    for c in prm.choices:
+        if nv == norm(c.name) or v == str(c.value) or (dur is not None and dur == c.value):
+            return c if es_choice else c.value
+    for c in prm.choices:
+        if norm(c.name).startswith(nv):
+            return c if es_choice else c.value
+    raise PrefijoError(f"«{v}» no es una opción válida.\nOpciones: " + " · ".join(f"`{c.name}`" for c in prm.choices))
+
+
+async def _convertir(v, prm, anot, guild, cmd, shim):
+    base = _desenvolver(anot)
+    es_choice = typing.get_origin(base) is app_commands.Choice or base is app_commands.Choice
+    T = discord.AppCommandOptionType
+    if prm.choices:
+        return _conv_opcion(v, prm, es_choice)
+    if prm.type is T.user:
+        return await _conv_usuario(v, guild, base is discord.Member)
+    if prm.type is T.channel:
+        return _conv_canal(v, guild, base)
+    if prm.type is T.role:
+        return _conv_rol(v, guild)
+    if prm.type is T.mentionable:
+        mt = re.fullmatch(r"<@&(\d+)>", v)
+        return _conv_rol(v, guild) if mt else await _conv_usuario(v, guild, False)
+    if prm.type in (T.integer, T.number):
+        try:
+            n = int(v) if prm.type is T.integer else float(v.replace(",", "."))
+        except ValueError:
+            raise PrefijoError(f"**{prm.display_name}** debe ser un número.")
+        if prm.min_value is not None and n < prm.min_value or prm.max_value is not None and n > prm.max_value:
+            raise PrefijoError(f"**{prm.display_name}** debe estar entre {prm.min_value} y {prm.max_value}.")
+        return n
+    if prm.type is T.boolean:
+        if norm(v) in ("si", "true", "yes", "1", "on", "activar"):
+            return True
+        if norm(v) in ("no", "false", "0", "off", "desactivar"):
+            return False
+        raise PrefijoError(f"**{prm.display_name}** debe ser «sí» o «no».")
+    # texto
+    if prm.min_value is not None and len(v) < prm.min_value or prm.max_value is not None and len(v) > prm.max_value:
+        raise PrefijoError(f"**{prm.display_name}** debe tener entre {prm.min_value} y {prm.max_value} caracteres.")
+    if prm.autocomplete:  # eventos, sorteos, formularios...
+        opciones = await _opciones_autocompletar(cmd, prm, shim)
+        if opciones:
+            nv = norm(v.lstrip("#"))
+            for o in opciones:
+                if v == str(o.value) or nv == norm(str(o.value)) or nv == norm(o.name):
+                    return o.value
+            for o in opciones:
+                if nv and nv in norm(o.name):
+                    return o.value
+            raise PrefijoError(f"No encuentro «{v}» en **{prm.display_name}**." + _texto_opciones(opciones))
+    return v
+
+
+async def _enlazar(cmd, toks, resto: str, msg: discord.Message, shim):
+    """Convierte los argumentos escritos en los parámetros del comando slash."""
+    firma = inspect.signature(cmd.callback).parameters
+    params = list(cmd.parameters)
+    T = discord.AppCommandOptionType
+    adjuntos = list(msg.attachments)
+    sin_adj = [p for p in params if p.type is not T.attachment]
+    ultimo = sin_adj[-1].name if sin_adj else None
+    kwargs, pos = {}, 0
+    for prm in params:
+        anot = firma[prm.name].annotation if prm.name in firma else None
+        if prm.type is T.attachment:
+            if adjuntos:
+                kwargs[prm.name] = adjuntos.pop(0)
+            elif prm.required:
+                raise PrefijoError(f"Adjunta la imagen en el **mismo mensaje** (**{prm.display_name}**).")
+            continue
+        if pos >= len(toks):
+            if prm.required:
+                extra = _texto_opciones(await _opciones_autocompletar(cmd, prm, shim)) if prm.autocomplete else ""
+                raise PrefijoError(f"Falta **{prm.display_name}**." + extra)
+            continue
+        if prm.type is T.string and prm.name == ultimo and not prm.choices and not prm.autocomplete:
+            valor = resto[toks[pos][1]:].strip()  # el último texto toma todo lo que falta
+            if len(valor) > 1 and valor[0] == valor[-1] == '"':
+                valor = valor[1:-1]
+            pos = len(toks)
+        else:
+            valor = toks[pos][0]
+            pos += 1
+        if valor in ("-", "_") and not prm.required:  # «-» para saltar un opcional
+            continue
+        kwargs[prm.name] = await _convertir(valor, prm, anot, msg.guild, cmd, shim)
+    return kwargs
+
+
+async def _permisos_prefijo(cmd, m: discord.Message, shim):
+    obj = cmd
+    while obj is not None:  # permisos por defecto del comando (y de su grupo)
+        dp = getattr(obj, "default_permissions", None)
+        if dp is not None and not m.author.guild_permissions.is_superset(dp):
+            raise PrefijoError("No tienes permisos para usar este comando.", uso=False)
+        obj = getattr(obj, "parent", None)
+    for chk in getattr(cmd, "checks", []):
+        r = chk(shim)
+        if inspect.isawaitable(r):
+            r = await r
+        if not r:
+            raise PrefijoError("No puedes usar este comando.", uso=False)
+
+
+class _RespuestaPrefijo:
+    def __init__(self, inter):
+        self._i = inter
+        self._hecho = False
+
+    def is_done(self) -> bool:
+        return self._hecho
+
+    async def send_message(self, content=None, **kw):
+        self._hecho = True
+        await self._i._enviar(content, **kw)
+
+    async def defer(self, **kw):
+        self._hecho = True
+
+    async def send_modal(self, modal):
+        raise PrefijoError("Esa acción abre un formulario emergente y solo funciona con el comando `/` (slash).", uso=False)
+
+    async def edit_message(self, **kw):
+        raise PrefijoError("Esa acción solo funciona con botones o con el comando `/` (slash).", uso=False)
+
+
+class _SeguimientoPrefijo:
+    def __init__(self, inter):
+        self._i = inter
+
+    async def send(self, content=None, **kw):
+        return await self._i._enviar(content, **kw)
+
+
+class InteraccionPrefijo:
+    """Imita a discord.Interaction para reutilizar los comandos slash cuando se escriben con prefijo."""
+
+    def __init__(self, msg: discord.Message, cmd, persistente: bool = False):
+        self._msg = msg
+        self._ultimo = None
+        self.persistente = persistente
+        self.command = cmd
+        self.client = client
+        self.user = msg.author
+        self.guild = msg.guild
+        self.guild_id = msg.guild.id
+        self.channel = msg.channel
+        self.channel_id = msg.channel.id
+        self.id = msg.id
+        self.created_at = msg.created_at
+        self.message = None
+        self.data = {}
+        self.permissions = msg.channel.permissions_for(msg.author)
+        self.app_permissions = msg.channel.permissions_for(msg.guild.me)
+        self.response = _RespuestaPrefijo(self)
+        self.followup = _SeguimientoPrefijo(self)
+
+    async def _enviar(self, content=None, **kw):
+        efimero = kw.pop("ephemeral", False)
+        args = {}
+        for k in ("embed", "embeds", "view", "file", "files", "allowed_mentions", "silent", "suppress_embeds", "delete_after"):
+            v = kw.get(k)
+            if v is not None and v is not discord.utils.MISSING:
+                args[k] = v
+        if content is not None and content is not discord.utils.MISSING:
+            args["content"] = content
+        if efimero and not self.persistente and "delete_after" not in args:
+            args["delete_after"] = 600 if "view" in args else 90  # sin mensajes privados: se borra solo
+        try:
+            msg = await self._msg.reply(mention_author=False, **args)
+        except discord.HTTPException:
+            msg = await self._msg.channel.send(**args)
+        self._ultimo = msg
+        return msg
+
+    async def original_response(self):
+        if self._ultimo is None:
+            raise RuntimeError("Aún no hay respuesta")
+        return self._ultimo
+
+    async def edit_original_response(self, **kw):
+        self._ultimo = await self._ultimo.edit(**kw)
+        return self._ultimo
+
+    async def delete_original_response(self):
+        if self._ultimo is not None:
+            await self._ultimo.delete()
+
+    def is_expired(self) -> bool:
+        return False
+
+
+def _embed_uso(cmd, pref: str) -> discord.Embed:
+    e = discord.Embed(title=f"⌨️ {pref}{cmd.qualified_name}", description=cmd.description, color=0x5865F2)
+    e.add_field(name="Uso", value=f"`{_uso(cmd, pref)}`", inline=False)
+    detalles = []
+    for prm in cmd.parameters:
+        marca = "obligatorio" if prm.required else "opcional"
+        detalles.append(f"• **{prm.display_name}** ({marca}) — {prm.description or '—'}")
+    if detalles:
+        e.add_field(name="Parámetros", value="\n".join(detalles)[:1024], inline=False)
+    e.set_footer(text='Textos con espacios entre comillas · "-" salta un opcional · imágenes adjuntas en el mismo mensaje')
+    return e
+
+
+async def _prefijo_ayuda(m: discord.Message, pref: str, toks):
+    if not toks:
+        shim = InteraccionPrefijo(m, help_cmd, persistente=True)
+        return await help_cmd.callback(shim)
+    primero = _clave(toks[0][0])
+    if primero in ("lista", "todos", "todo", "comandos"):
+        cmds = sorted({id(c): c for c in _mapa_prefijo().values()}.values(), key=lambda c: c.qualified_name)
+        for i in range(0, len(cmds), 12):
+            lineas = [f"`{_uso(c, pref)}`\n└ {c.description[:70]}" for c in cmds[i:i + 12]]
+            e = discord.Embed(title="⌨️ Comandos con prefijo" + (f" ({i // 12 + 1})" if len(cmds) > 12 else ""),
+                              description="\n".join(lineas), color=0x5865F2)
+            if i == 0:
+                e.set_footer(text=f"{pref}ayuda <comando> te explica cada parámetro")
+            await (m.reply(embed=e, mention_author=False) if i == 0 else m.channel.send(embed=e))
+        return
+    tipo, cmd, _ = _resolver_comando(toks)
+    if tipo == "cmd":
+        return await m.reply(embed=_embed_uso(cmd, pref), mention_author=False)
+    if tipo == "grupo":
+        subs = [c for c in cmd.commands]
+        e = discord.Embed(title=f"⌨️ {pref}{cmd.name}", description=cmd.description, color=0x5865F2)
+        e.add_field(name="Subcomandos", value="\n".join(f"`{_uso(c, pref)}`" for c in subs)[:1024], inline=False)
+        return await m.reply(embed=e, mention_author=False)
+    await m.reply(f"❌ No conozco ese comando. Usa `{pref}ayuda lista` para ver todos.", mention_author=False, delete_after=20)
+
+
+async def manejar_prefijo(m: discord.Message) -> bool:
+    """Ejecuta un comando escrito con prefijo. Devuelve True si el mensaje era un comando."""
+    texto = m.content
+    if not texto:
+        return False
+    pref = cfg(m.guild.id)["prefijo"]
+    bajo, uid = texto.lower(), client.user.id
+    resto = None
+    for p in (pref, "nexus ", f"<@{uid}> ", f"<@!{uid}> "):
+        if (texto.startswith(p) if p == pref else bajo.startswith(p)):
+            resto = texto[len(p):].strip()
+            break
+    if not resto:
+        return False
+    toks = _tokenizar(resto)
+    tipo, cmd, usados = _resolver_comando(toks)
+    if tipo is None:
+        return False  # no era un comando: se ignora en silencio
+
+    ahora = time.monotonic()
+    if ahora - _COOLDOWN_PFX.get(m.author.id, 0) < 1.5:
+        return True
+    _COOLDOWN_PFX[m.author.id] = ahora
+
+    try:
+        if tipo == "ayuda":
+            await _prefijo_ayuda(m, pref, toks[usados:])
+        elif tipo == "grupo":
+            e = discord.Embed(title=f"⌨️ {pref}{cmd.name}", description=cmd.description, color=0x5865F2)
+            e.add_field(name="Subcomandos", value="\n".join(f"`{_uso(c, pref)}`" for c in cmd.commands)[:1024], inline=False)
+            await m.reply(embed=e, mention_author=False)
+        else:
+            shim = InteraccionPrefijo(m, cmd)
+            await _permisos_prefijo(cmd, m, shim)
+            kwargs = await _enlazar(cmd, toks[usados:], resto, m, shim)
+            await cmd.callback(shim, **kwargs)
+    except PrefijoError as e:
+        texto_err = f"❌ {e.mensaje}" + (f"\n**Uso:** `{_uso(cmd, pref)}`" if e.uso and cmd is not None else "")
+        await m.reply(texto_err, mention_author=False, delete_after=40)
+    except app_commands.CheckFailure as e:
+        await m.reply(f"❌ {e}" if str(e) else "❌ No puedes usar este comando.", mention_author=False, delete_after=20)
+    except Exception:
+        traceback.print_exc()
+        await m.reply("❌ Ocurrió un error al ejecutar el comando.", mention_author=False, delete_after=20)
+    return True
+
+
+@tree.command(name="prefijo", description="Cambia el prefijo para usar los comandos con texto (por defecto !)")
+@app_commands.describe(nuevo="Nuevo prefijo (1 a 5 caracteres, sin espacios). Ej: ! . $ n!")
+@app_commands.default_permissions(administrator=True)
+@app_commands.guild_only()
+async def prefijo_cmd(interaction: discord.Interaction, nuevo: app_commands.Range[str, 1, 5]):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
+    if any(c.isspace() for c in nuevo) or nuevo.startswith("<@") or nuevo.startswith("@"):
+        return await interaction.response.send_message("❌ El prefijo no puede tener espacios ni empezar con una mención.", ephemeral=True)
+    cfg(interaction.guild_id)["prefijo"] = nuevo
+    save()
+    embed = discord.Embed(
+        title="⌨️ Prefijo actualizado",
+        description=f"Ahora los comandos con texto empiezan con `{nuevo}` (ej: `{nuevo}dado 12`, `{nuevo}ayuda`).\n"
+        "También siguen funcionando `nexus ayuda` y `@Nexus ayuda`.",
+        color=0x2ECC71,
+    )
+    await interaction.response.send_message(embed=embed)
 
 
 # ───────────────────── Mensajes: sugerencias + presentación ──────────────────
@@ -4104,6 +4650,10 @@ async def on_message(m: discord.Message):
                     await m.delete()
                 except discord.HTTPException:
                     pass
+        return
+
+    # Comandos con prefijo: !comando · nexus comando · @Nexus comando
+    if await manejar_prefijo(m):
         return
 
     # Presentación: SOLO con mención directa (no si es respuesta a un mensaje)
