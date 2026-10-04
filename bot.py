@@ -1,6 +1,7 @@
 import os
 import json
 import random
+from typing import Optional
 import discord
 from discord import app_commands
 
@@ -21,6 +22,11 @@ def save():
 def cfg(guild_id):
     g = data.setdefault(str(guild_id), {})
     g.setdefault("sug", {"canal": None, "roles": [], "items": {}})
+    g.setdefault("ev", {
+        "roles": [],
+        "activos": {},
+        "style": {"titulo": "🎉 Nuevo evento", "color": "5865F2", "imagen": None, "miniatura": None, "footer": None},
+    })
     return g
 
 
@@ -37,6 +43,7 @@ class Nexus(discord.Client):
 
     async def setup_hook(self):
         self.add_view(SugerenciaView())  # botones persistentes tras reiniciar
+        self.add_view(EventoView())
         await self.tree.sync()
 
 
@@ -250,6 +257,236 @@ async def sugerencias(interaction: discord.Interaction, texto: app_commands.Rang
     )
 
 
+# ───────────────────────────────── Eventos ───────────────────────────────────
+ESTADOS = {"abierto": "🟢 Abierto", "iniciado": "▶️ En curso", "finalizado": "🏁 Finalizado"}
+
+
+def puede_organizar(member: discord.Member) -> bool:
+    c = cfg(member.guild.id)["ev"]
+    return member.guild_permissions.administrator or any(r.id in c["roles"] for r in member.roles)
+
+
+def build_event_embed(ev: dict) -> discord.Embed:
+    st = ev["style"]
+    try:
+        color = int(st["color"].lstrip("#"), 16)
+    except ValueError:
+        color = 0x5865F2
+    embed = discord.Embed(title=st["titulo"], description=ev["descripcion"], color=color)
+    embed.add_field(name="👤 Organizador", value=f"<@{ev['organizador']}>", inline=True)
+    # Campos opcionales: solo aparecen si se rellenaron
+    if ev.get("tipo"):
+        embed.add_field(name="🎯 Tipo de evento", value=ev["tipo"], inline=True)
+    if ev.get("premio"):
+        embed.add_field(name="🎁 Premio", value=ev["premio"], inline=True)
+    if ev.get("tiempo"):
+        embed.add_field(name="⏰ Tiempo", value=ev["tiempo"], inline=True)
+    if ev.get("ganadores"):
+        embed.add_field(name="🏆 Ganadores", value=ev["ganadores"], inline=True)
+    embed.add_field(name="📌 Estado", value=ESTADOS[ev["estado"]], inline=True)
+    embed.add_field(name="👥 Participantes", value=str(len(ev["participantes"])), inline=True)
+    if ev.get("resultado"):
+        embed.add_field(name="🥇 Resultado", value=ev["resultado"], inline=False)
+    if st.get("imagen"):
+        embed.set_image(url=st["imagen"])
+    if st.get("miniatura"):
+        embed.set_thumbnail(url=st["miniatura"])
+    if st.get("footer"):
+        embed.set_footer(text=st["footer"])
+    return embed
+
+
+class EventoView(discord.ui.View):
+    def __init__(self, cerrado: bool = False):
+        super().__init__(timeout=None)
+        if cerrado:
+            for c in self.children:
+                c.disabled = True
+
+    @discord.ui.button(label="Participar", emoji="✅", style=discord.ButtonStyle.success, custom_id="ev:join")
+    async def participar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        ev = cfg(interaction.guild.id)["ev"]["activos"].get(str(interaction.message.id))
+        if not ev:
+            return await interaction.response.send_message("❌ Este evento ya no existe.", ephemeral=True)
+        if ev["estado"] != "abierto":
+            return await interaction.response.send_message("🔒 Las inscripciones de este evento ya cerraron.", ephemeral=True)
+        uid = interaction.user.id
+        if uid in ev["participantes"]:
+            ev["participantes"].remove(uid)
+            texto = "👋 Saliste del evento."
+        else:
+            ev["participantes"].append(uid)
+            texto = "✅ ¡Ya estás participando!"
+        save()
+        await interaction.response.edit_message(embed=build_event_embed(ev))
+        await interaction.followup.send(texto, ephemeral=True)
+
+
+async def eventos_ac(interaction: discord.Interaction, current: str, estado: str):
+    activos = cfg(interaction.guild.id)["ev"]["activos"]
+    out = []
+    for mid, ev in activos.items():
+        if ev["estado"] != estado:
+            continue
+        etiqueta = f"{ev.get('tipo') or 'Evento'} · {ev['descripcion']}"[:95]
+        if current.lower() in etiqueta.lower():
+            out.append(app_commands.Choice(name=etiqueta, value=mid))
+    return out[:25]
+
+
+async def mensaje_evento(guild: discord.Guild, ev: dict):
+    canal = guild.get_channel(ev["canal"])
+    if canal is None:
+        return None, None
+    try:
+        return canal, await canal.fetch_message(ev["msg"])
+    except discord.NotFound:
+        return canal, None
+
+
+@tree.command(name="organizar-evento", description="Publica un evento con botón para participar")
+@app_commands.describe(
+    canal="Canal donde se enviará el evento",
+    organizador="Quién organiza el evento",
+    descripcion="Descripción del evento",
+    ping="Rol a mencionar (opcional)",
+    premio="Premio (opcional)",
+    tiempo="Duración o fecha (opcional)",
+    tipo="Tipo de evento (opcional)",
+    ganadores="Cantidad de ganadores (opcional)",
+)
+@app_commands.guild_only()
+async def organizar_evento(
+    interaction: discord.Interaction,
+    canal: discord.TextChannel,
+    organizador: discord.Member,
+    descripcion: app_commands.Range[str, 1, 2000],
+    ping: Optional[discord.Role] = None,
+    premio: Optional[str] = None,
+    tiempo: Optional[str] = None,
+    tipo: Optional[str] = None,
+    ganadores: Optional[str] = None,
+):
+    if not puede_organizar(interaction.user):
+        return await interaction.response.send_message("❌ No tienes permiso para organizar eventos.", ephemeral=True)
+    ev = {
+        "canal": canal.id,
+        "organizador": organizador.id,
+        "descripcion": descripcion,
+        "premio": premio,
+        "tiempo": tiempo,
+        "tipo": tipo,
+        "ganadores": ganadores,
+        "estado": "abierto",
+        "participantes": [],
+        "style": dict(cfg(interaction.guild.id)["ev"]["style"]),  # copia del diseño actual
+        "creado_por": interaction.user.id,
+    }
+    try:
+        msg = await canal.send(
+            content=ping.mention if ping else None,
+            embed=build_event_embed(ev),
+            view=EventoView(),
+            allowed_mentions=discord.AllowedMentions(roles=True, everyone=True),
+        )
+    except discord.Forbidden:
+        return await interaction.response.send_message(f"❌ No puedo enviar mensajes en {canal.mention}.", ephemeral=True)
+    ev["msg"] = msg.id
+    cfg(interaction.guild.id)["ev"]["activos"][str(msg.id)] = ev
+    save()
+    await interaction.response.send_message(f"✅ Evento publicado: {msg.jump_url}", ephemeral=True)
+
+
+@tree.command(name="iniciar-evento", description="Inicia un evento que está abierto")
+@app_commands.describe(evento="Evento a iniciar")
+@app_commands.guild_only()
+async def iniciar_evento(interaction: discord.Interaction, evento: str):
+    if not puede_organizar(interaction.user):
+        return await interaction.response.send_message("❌ No tienes permiso para esto.", ephemeral=True)
+    ev = cfg(interaction.guild.id)["ev"]["activos"].get(evento)
+    if not ev or ev["estado"] != "abierto":
+        return await interaction.response.send_message("⚠️ Ese evento no existe o ya fue iniciado.", ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
+    ev["estado"] = "iniciado"
+    save()
+    canal, msg = await mensaje_evento(interaction.guild, ev)
+    if msg:
+        await msg.edit(embed=build_event_embed(ev), view=EventoView(cerrado=True))
+    if canal:
+        await canal.send(
+            f"▶️ **¡El evento ha comenzado!** Organiza <@{ev['organizador']}> · "
+            f"{len(ev['participantes'])} participante(s).",
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+    await interaction.followup.send("✅ Evento iniciado.", ephemeral=True)
+
+
+@iniciar_evento.autocomplete("evento")
+async def ac_iniciar(interaction: discord.Interaction, current: str):
+    return await eventos_ac(interaction, current, "abierto")
+
+
+@tree.command(name="finalizar-evento", description="Finaliza un evento iniciado y anuncia ganadores")
+@app_commands.describe(
+    evento="Evento a finalizar",
+    ganador="Ganador (o 1.º lugar)",
+    segundo="2.º lugar (opcional, para top 3)",
+    tercero="3.º lugar (opcional, para top 3)",
+    foto="Foto del premio entregado (opcional)",
+)
+@app_commands.guild_only()
+async def finalizar_evento(
+    interaction: discord.Interaction,
+    evento: str,
+    ganador: Optional[discord.Member] = None,
+    segundo: Optional[discord.Member] = None,
+    tercero: Optional[discord.Member] = None,
+    foto: Optional[discord.Attachment] = None,
+):
+    if not puede_organizar(interaction.user):
+        return await interaction.response.send_message("❌ No tienes permiso para esto.", ephemeral=True)
+    ev = cfg(interaction.guild.id)["ev"]["activos"].get(evento)
+    if not ev or ev["estado"] != "iniciado":
+        return await interaction.response.send_message("⚠️ Ese evento no existe o aún no fue iniciado.", ephemeral=True)
+    if foto and not (foto.content_type or "").startswith("image/"):
+        return await interaction.response.send_message("❌ El archivo adjunto debe ser una imagen.", ephemeral=True)
+
+    await interaction.response.defer(ephemeral=True)
+    lineas = [f"{medalla} {m.mention}" for medalla, m in (("🥇", ganador), ("🥈", segundo), ("🥉", tercero)) if m]
+    ev["estado"] = "finalizado"
+    ev["resultado"] = "\n".join(lineas) or None
+    save()
+
+    canal, msg = await mensaje_evento(interaction.guild, ev)
+    if msg:
+        await msg.edit(embed=build_event_embed(ev), view=None)
+    if canal:
+        resultado = discord.Embed(
+            title="🏁 ¡Evento finalizado!",
+            description=ev["descripcion"],
+            color=0xF1C40F,
+        )
+        resultado.add_field(name="🏆 Ganador(es)", value=ev["resultado"] or "Sin ganadores registrados", inline=False)
+        if ev.get("premio"):
+            resultado.add_field(name="🎁 Premio", value=ev["premio"], inline=False)
+        resultado.add_field(name="👤 Organizador", value=f"<@{ev['organizador']}>", inline=True)
+        resultado.add_field(name="👥 Participantes", value=str(len(ev["participantes"])), inline=True)
+        kwargs = {}
+        if foto:
+            archivo = await foto.to_file()
+            resultado.set_image(url=f"attachment://{archivo.filename}")
+            kwargs["file"] = archivo
+        await canal.send(embed=resultado, allowed_mentions=discord.AllowedMentions(users=True), **kwargs)
+    await interaction.followup.send("✅ Evento finalizado.", ephemeral=True)
+
+
+@finalizar_evento.autocomplete("evento")
+async def ac_finalizar(interaction: discord.Interaction, current: str):
+    return await eventos_ac(interaction, current, "iniciado")
+
+
+
+
 # ───────────────────────────── /configuracion ────────────────────────────────
 SECCIONES = {
     "sugerencias": ("💡", "Sugerencias", "Canal y roles que aprueban"),
@@ -311,6 +548,10 @@ class Menu(discord.ui.Select):
         k = self.values[0]
         if k == "sugerencias":
             return await interaction.response.edit_message(embed=sug_embed(interaction.guild.id), view=SugView())
+        if k == "eventos":
+            return await interaction.response.edit_message(
+                embeds=ev_panel(interaction.guild.id, interaction.user.id), view=EvConfigView()
+            )
         e, n, _ = SECCIONES[k]
         embed = discord.Embed(
             title=f"{e} {n}", description="🚧 Esta sección se agregará en la siguiente fase.", color=0x95A5A6
@@ -351,6 +592,117 @@ class SugView(AdminView):
         await interaction.response.edit_message(embed=home_embed(), view=HomeView())
 
 
+def ev_panel(guild_id: int, user_id: int):
+    c = cfg(guild_id)["ev"]
+    info = discord.Embed(title="🎉 Configurar eventos", color=0x5865F2)
+    info.add_field(
+        name="Roles que pueden organizar / iniciar / finalizar",
+        value=" ".join(f"<@&{r}>" for r in c["roles"]) or "Solo administradores",
+        inline=False,
+    )
+    info.set_footer(text="Abajo está la vista previa del embed. Se actualiza al editarlo.")
+    ejemplo = {
+        "style": c["style"],
+        "descripcion": "Así se verá la descripción del evento.",
+        "organizador": user_id,
+        "tipo": "Ejemplo",
+        "premio": "Premio de ejemplo",
+        "tiempo": "30 minutos",
+        "estado": "abierto",
+        "participantes": [],
+    }
+    return [info, build_event_embed(ejemplo)]
+
+
+class EvTextoModal(discord.ui.Modal, title="Editar texto y color"):
+    def __init__(self, guild_id: int):
+        super().__init__()
+        st = cfg(guild_id)["ev"]["style"]
+        self.titulo = discord.ui.TextInput(label="Título", default=st["titulo"], max_length=100)
+        self.color = discord.ui.TextInput(label="Color (hex, ej: 5865F2)", default=st["color"], min_length=6, max_length=7)
+        self.footer = discord.ui.TextInput(
+            label="Pie de página (vacío = ninguno)", default=st["footer"] or "", required=False, max_length=100
+        )
+        for i in (self.titulo, self.color, self.footer):
+            self.add_item(i)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        hexa = self.color.value.lstrip("#")
+        try:
+            if len(hexa) != 6:
+                raise ValueError
+            int(hexa, 16)
+        except ValueError:
+            return await interaction.response.send_message("❌ Color inválido. Usa 6 dígitos hex, ej: 5865F2.", ephemeral=True)
+        st = cfg(interaction.guild.id)["ev"]["style"]
+        st["titulo"] = self.titulo.value
+        st["color"] = hexa
+        st["footer"] = self.footer.value or None
+        save()
+        await interaction.response.edit_message(embeds=ev_panel(interaction.guild.id, interaction.user.id), view=EvConfigView())
+
+
+class EvImagenModal(discord.ui.Modal, title="Editar imágenes"):
+    def __init__(self, guild_id: int):
+        super().__init__()
+        st = cfg(guild_id)["ev"]["style"]
+        self.imagen = discord.ui.TextInput(
+            label="URL de la imagen grande (vacío = ninguna)", default=st["imagen"] or "", required=False
+        )
+        self.miniatura = discord.ui.TextInput(
+            label="URL de la miniatura (vacío = ninguna)", default=st["miniatura"] or "", required=False
+        )
+        self.add_item(self.imagen)
+        self.add_item(self.miniatura)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        for url in (self.imagen.value, self.miniatura.value):
+            if url and not url.startswith(("http://", "https://")):
+                return await interaction.response.send_message("❌ Las URLs deben empezar con http:// o https://", ephemeral=True)
+        st = cfg(interaction.guild.id)["ev"]["style"]
+        st["imagen"] = self.imagen.value or None
+        st["miniatura"] = self.miniatura.value or None
+        save()
+        await interaction.response.edit_message(embeds=ev_panel(interaction.guild.id, interaction.user.id), view=EvConfigView())
+
+
+class EvConfigView(AdminView):
+    @discord.ui.select(
+        cls=discord.ui.RoleSelect, min_values=1, max_values=10,
+        placeholder="➕ Agregar roles que pueden organizar eventos", row=0,
+    )
+    async def agregar(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        roles = cfg(interaction.guild.id)["ev"]["roles"]
+        for r in select.values:
+            if r.id not in roles:
+                roles.append(r.id)
+        save()
+        await interaction.response.edit_message(embeds=ev_panel(interaction.guild.id, interaction.user.id), view=EvConfigView())
+
+    @discord.ui.select(
+        cls=discord.ui.RoleSelect, min_values=1, max_values=10,
+        placeholder="➖ Quitar roles", row=1,
+    )
+    async def quitar(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        c = cfg(interaction.guild.id)["ev"]
+        quitar = {r.id for r in select.values}
+        c["roles"] = [r for r in c["roles"] if r not in quitar]
+        save()
+        await interaction.response.edit_message(embeds=ev_panel(interaction.guild.id, interaction.user.id), view=EvConfigView())
+
+    @discord.ui.button(label="✏️ Texto y color", style=discord.ButtonStyle.primary, row=2)
+    async def texto(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(EvTextoModal(interaction.guild.id))
+
+    @discord.ui.button(label="🖼️ Imágenes", style=discord.ButtonStyle.primary, row=2)
+    async def imagenes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(EvImagenModal(interaction.guild.id))
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=2)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=home_embed(), view=HomeView())
+
+
 @tree.command(name="configuracion", description="Panel de configuración de Nexus")
 @app_commands.default_permissions(administrator=True)
 @app_commands.guild_only()
@@ -374,7 +726,14 @@ async def help_cmd(interaction: discord.Interaction):
         value="`/ppt @usuario` — piedra, papel o tijera (ambos eligen en secreto)\n`/dado [caras]` — dado de 2 a 16 caras",
         inline=False,
     )
-    embed.add_field(name="🚧 Próximamente", value="Eventos, postulaciones, seguridad, moderación y adivina la palabra.", inline=False)
+    embed.add_field(
+        name="🎉 Eventos",
+        value="`/organizar-evento` publica el evento con botón **Participar**\n"
+        "`/iniciar-evento` lo inicia · `/finalizar-evento` lo cierra y anuncia ganadores/top 3\n"
+        "Roles y diseño del embed: `/configuracion → Eventos`",
+        inline=False,
+    )
+    embed.add_field(name="🚧 Próximamente", value="Postulaciones, seguridad, moderación y adivina la palabra.", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
