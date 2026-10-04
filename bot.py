@@ -2,6 +2,7 @@ import os
 import json
 import asyncio
 import io
+import re
 import time
 import unicodedata
 from collections import deque
@@ -10,6 +11,7 @@ from typing import Optional
 from datetime import timedelta
 import discord
 from discord import app_commands
+from datos import TRIVIA, IMAGENES  # preguntas e imágenes de /trivia
 
 # ──────────────────────────── Base de datos (JSON) ────────────────────────────
 DB_FILE = "data.json"
@@ -29,6 +31,13 @@ def cfg(guild_id):
     g = data.setdefault(str(guild_id), {})
     g.setdefault("sug", {"canal": None, "roles": [], "items": {}})
     g.setdefault("juegos", {"embeds": default_juegos_embeds()})
+    for _k, _v in default_juegos_embeds().items():
+        g["juegos"]["embeds"].setdefault(_k, _v)
+    g.setdefault("sort", {"roles": [], "items": {}, "embeds": default_sort_embeds()})
+    g.setdefault("tk", {
+        "categoria": None, "canal": None, "roles": [], "max": 1, "contador": 0,
+        "cats": [{"nombre": "Soporte", "desc": "Ayuda general"}], "abiertos": {}, "embeds": default_tk_embeds(),
+    })
     g.setdefault("seg", {
         "canal": None,
         "antibot": {"on": False},
@@ -67,6 +76,10 @@ class Nexus(discord.Client):
         self.add_view(EventoView())
         self.add_view(PostulaView())
         self.add_view(ReviewView())
+        self.add_view(SorteoView())
+        self.add_view(TicketPanelView())
+        self.add_view(TicketControlView())
+        asyncio.create_task(bucle_sorteos())
         await self.tree.sync()
 
 
@@ -1409,7 +1422,7 @@ async def antispam(m: discord.Message) -> bool:
     if not a["on"] or not isinstance(m.author, discord.Member):
         return False
     u = m.author
-    if u.guild_permissions.administrator or en_whitelist(u, s) or puede_moderar(u):
+    if u.guild_permissions.administrator or en_whitelist(u, s) or puede_moderar(u) or m.channel.id in JUEGOS_ADIVINA:
         return False
 
     ahora = time.time()
@@ -1547,6 +1560,10 @@ def default_juegos_embeds():
         "dado": {**base, "titulo": "🎲 Dado de {caras} caras", "color": "E67E22"},
         "tres_raya": {**base, "titulo": "❌⭕ Tres en raya", "color": "9B59B6"},
         "adivina": {**base, "titulo": "🔤 Adivina la palabra — {tema}", "color": "9B59B6"},
+        "numero": {**base, "titulo": "🔢 Adivina el número", "color": "1ABC9C"},
+        "desordenada": {**base, "titulo": "🔀 Palabra desordenada — {tema}", "color": "E91E63"},
+        "reflejos": {**base, "titulo": "⚡ Duelo de reflejos", "color": "F1C40F"},
+        "trivia": {**base, "titulo": "🧠 Trivia — {tema}", "color": "3498DB"},
     }
 
 
@@ -1908,6 +1925,858 @@ async def adivina_cmd(interaction: discord.Interaction):
     view.message = await interaction.original_response()
 
 
+# ───────────────────── Más juegos: número, desordenada, reflejos ─────────────
+@tree.command(name="adivina-el-numero", description="Adivina el número secreto antes que los demás")
+@app_commands.describe(maximo="Número máximo posible (por defecto 100)")
+@app_commands.guild_only()
+async def adivina_numero(interaction: discord.Interaction, maximo: app_commands.Range[int, 10, 10000] = 100):
+    canal = interaction.channel
+    if canal.id in JUEGOS_ADIVINA:
+        return await interaction.response.send_message("Ya hay una partida en este canal.", ephemeral=True)
+    JUEGOS_ADIVINA.add(canal.id)
+    try:
+        secreto = random.randint(1, maximo)
+        e = discord.Embed(
+            title="🔢 Adivina el número",
+            description=f"Pensé un número entre **1** y **{maximo}**.\nEscriban sus intentos en el chat: "
+            "⬆️ significa que es más alto y ⬇️ que es más bajo.\n\nTienen **60 segundos**.",
+            color=0x1ABC9C,
+        )
+        await interaction.response.send_message(embed=estilo_juego(interaction.guild_id, "numero", e))
+        intentos, ganador = {}, None
+        fin = time.monotonic() + 60
+        while ganador is None:
+            restante = fin - time.monotonic()
+            if restante <= 0:
+                break
+            try:
+                m = await client.wait_for(
+                    "message",
+                    check=lambda x: x.channel.id == canal.id and not x.author.bot and x.content.strip().isdigit(),
+                    timeout=restante,
+                )
+            except asyncio.TimeoutError:
+                break
+            n = int(m.content.strip())
+            intentos[m.author.id] = intentos.get(m.author.id, 0) + 1
+            if n == secreto:
+                ganador = m
+                break
+            try:
+                await m.add_reaction("⬆️" if n < secreto else "⬇️")
+            except discord.HTTPException:
+                pass
+        if ganador:
+            final = discord.Embed(
+                title="🏆 ¡Número adivinado!",
+                description=f"{ganador.author.mention} acertó: era el **{secreto}** "
+                f"(en {intentos[ganador.author.id]} intento(s)).",
+                color=0x2ECC71,
+            )
+        else:
+            final = discord.Embed(title="⌛ Se acabó el tiempo", description=f"Nadie lo adivinó. Era el **{secreto}**.", color=0x95A5A6)
+        await canal.send(embed=estilo_juego(interaction.guild_id, "numero", final, titulo=False))
+    finally:
+        JUEGOS_ADIVINA.discard(canal.id)
+
+
+def desordenar(palabra: str) -> str:
+    grupos = []
+    for parte in palabra.split(" "):
+        letras = list(parte)
+        for _ in range(10):
+            random.shuffle(letras)
+            if "".join(letras) != parte or len(set(parte)) < 2:
+                break
+        grupos.append(" ".join(l.upper() for l in letras))
+    return "   /   ".join(grupos)
+
+
+async def esperar_palabra(canal, palabra: str, segundos: float):
+    fin = time.monotonic() + segundos
+    while True:
+        restante = fin - time.monotonic()
+        if restante <= 0:
+            return None
+        try:
+            m = await client.wait_for(
+                "message", check=lambda x: x.channel.id == canal.id and not x.author.bot, timeout=restante
+            )
+        except asyncio.TimeoutError:
+            return None
+        if norm(m.content) == palabra:
+            return m
+
+
+@tree.command(name="palabra-desordenada", description="Ordena las letras y adivina la palabra antes que los demás")
+@app_commands.describe(tematica="Temática (por defecto, al azar)")
+@app_commands.choices(tematica=[
+    app_commands.Choice(name="Anime", value="anime"),
+    app_commands.Choice(name="Historia", value="historia"),
+    app_commands.Choice(name="Videojuegos", value="videojuegos"),
+    app_commands.Choice(name="Al azar", value="azar"),
+])
+@app_commands.guild_only()
+async def palabra_desordenada(interaction: discord.Interaction, tematica: Optional[app_commands.Choice[str]] = None):
+    canal = interaction.channel
+    if canal.id in JUEGOS_ADIVINA:
+        return await interaction.response.send_message("Ya hay una partida en este canal.", ephemeral=True)
+    JUEGOS_ADIVINA.add(canal.id)
+    try:
+        tema = tematica.value if tematica and tematica.value != "azar" else random.choice(list(TEMAS))
+        emoji, nombre = TEMAS[tema]
+        palabra, pista = random.choice(PALABRAS[tema])
+        vars_ = {"{tema}": f"{emoji} {nombre}"}
+        e = discord.Embed(title=f"🔀 Palabra desordenada — {emoji} {nombre}", color=0xE91E63)
+        e.add_field(name="Letras desordenadas", value=f"```{desordenar(palabra)}```", inline=False)
+        e.add_field(name="💡 Pista", value=pista, inline=False)
+        e.set_footer(text="Escribe la respuesta en el chat · Tienen 45 segundos")
+        await interaction.response.send_message(embed=estilo_juego(interaction.guild_id, "desordenada", e, vars_))
+
+        ganador = await esperar_palabra(canal, palabra, 20)
+        if ganador is None:
+            await canal.send(f"🔎 Pista extra: empieza con **{palabra[0].upper()}** y tiene {len(palabra.replace(' ', ''))} letras.")
+            ganador = await esperar_palabra(canal, palabra, 25)
+        if ganador:
+            try:
+                await ganador.add_reaction("✅")
+            except discord.HTTPException:
+                pass
+            final = discord.Embed(title="🏆 ¡Correcto!", description=f"{ganador.author.mention} la adivinó: **{palabra.upper()}**", color=0x2ECC71)
+        else:
+            final = discord.Embed(title="⌛ Se acabó el tiempo", description=f"Nadie acertó. Era **{palabra.upper()}**.", color=0x95A5A6)
+        await canal.send(embed=estilo_juego(interaction.guild_id, "desordenada", final, vars_, titulo=False))
+    finally:
+        JUEGOS_ADIVINA.discard(canal.id)
+
+
+class ReflejosView(discord.ui.View):
+    def __init__(self, a, b, gid):
+        super().__init__(timeout=30)
+        self.jugadores = [a.id, b.id]
+        self.gid = gid
+        self.listo = False
+        self.terminado = False
+        self.t0 = None
+        self.message = None
+
+    def embed(self, resultado=None):
+        a, b = self.jugadores
+        desc = f"<@{a}> vs <@{b}>\n\n" + (resultado or "Cuando el botón se ponga **verde**, ¡púlsalo lo más rápido que puedas!\nSi lo pulsas antes, **pierdes**.")
+        e = discord.Embed(title="⚡ Duelo de reflejos", description=desc, color=0xF1C40F)
+        return estilo_juego(self.gid, "reflejos", e)
+
+    async def correr(self):
+        await asyncio.sleep(random.uniform(2, 6))
+        if self.terminado:
+            return
+        self.boton.label, self.boton.emoji, self.boton.style = "¡YA!", "⚡", discord.ButtonStyle.success
+        try:
+            await self.message.edit(view=self)
+        except discord.HTTPException:
+            return
+        self.listo = True
+        self.t0 = time.monotonic()
+
+    @discord.ui.button(label="Espera...", emoji="⏳", style=discord.ButtonStyle.danger)
+    async def boton(self, interaction: discord.Interaction, button: discord.ui.Button):
+        uid = interaction.user.id
+        if uid not in self.jugadores:
+            return await interaction.response.send_message("No participas en este duelo.", ephemeral=True)
+        if self.terminado:
+            return await interaction.response.send_message("El duelo ya terminó.", ephemeral=True)
+        self.terminado = True
+        otro = self.jugadores[1] if uid == self.jugadores[0] else self.jugadores[0]
+        if not self.listo:
+            res = f"🚫 <@{uid}> se adelantó. ¡Gana <@{otro}>!"
+        else:
+            res = f"⚡ ¡<@{uid}> fue más rápido! (**{int((time.monotonic() - self.t0) * 1000)} ms**)"
+        button.disabled = True
+        self.stop()
+        await interaction.response.edit_message(content=None, embed=self.embed(res), view=self)
+
+    async def on_timeout(self):
+        self.terminado = True
+        self.boton.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(embed=self.embed("⌛ Nadie pulsó el botón."), view=self)
+            except discord.HTTPException:
+                pass
+
+
+@tree.command(name="reflejos", description="Duelo de reflejos: pulsa el botón cuando se ponga verde")
+@app_commands.describe(oponente="Con quién quieres competir")
+@app_commands.guild_only()
+async def reflejos(interaction: discord.Interaction, oponente: discord.Member):
+    if oponente.bot or oponente.id == interaction.user.id:
+        return await interaction.response.send_message("Elige a otra persona (ni un bot ni tú mismo).", ephemeral=True)
+    view = ReflejosView(interaction.user, oponente, interaction.guild_id)
+    await interaction.response.send_message(
+        content=f"{oponente.mention}, {interaction.user.mention} te retó a un duelo de reflejos.", embed=view.embed(), view=view
+    )
+    view.message = await interaction.original_response()
+    asyncio.create_task(view.correr())
+
+
+# ───────────────────────────────── Trivia ────────────────────────────────────
+TRIVIA_SEGUNDOS = 15
+LETRAS = ["A", "B", "C", "D"]
+
+
+class TriviaBtn(discord.ui.Button):
+    def __init__(self, i: int):
+        super().__init__(label=LETRAS[i], style=discord.ButtonStyle.primary, row=0)
+        self.i = i
+
+    async def callback(self, interaction: discord.Interaction):
+        v = self.view
+        if interaction.user.id in v.respuestas:
+            return await interaction.response.send_message("Ya respondiste esta pregunta.", ephemeral=True)
+        v.respuestas[interaction.user.id] = (self.i, time.monotonic() - v.t0)
+        await interaction.response.send_message(
+            f"✅ Elegiste **{LETRAS[self.i]}**. ¡Veremos si acertaste!", ephemeral=True
+        )
+
+
+class TriviaPreguntaView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=TRIVIA_SEGUNDOS)
+        self.respuestas = {}  # user_id -> (opción elegida, segundos que tardó)
+        self.t0 = time.monotonic()
+        for i in range(4):
+            self.add_item(TriviaBtn(i))
+
+
+def embed_trivia(gid, tema, n, total, texto, opciones, img, idx_ok=None, extra=""):
+    emoji, nombre = TEMAS[tema]
+    lineas = []
+    for i, o in enumerate(opciones):
+        if idx_ok is None:
+            lineas.append(f"**{LETRAS[i]})** {o}")
+        elif i == idx_ok:
+            lineas.append(f"✅ **{LETRAS[i]}) {o}**")
+        else:
+            lineas.append(f"▫️ {LETRAS[i]}) {o}")
+    cabecera = f"{emoji} Pregunta **{n}/{total}**" + (f" · ⏱️ {TRIVIA_SEGUNDOS} s · cualquiera puede responder" if idx_ok is None else "")
+    desc = f"{cabecera}\n\n**{texto}**\n\n" + "\n".join(lineas) + (f"\n\n{extra}" if extra else "")
+    e = discord.Embed(title=f"🧠 Trivia — {nombre}", description=desc, color=0x3498DB)
+    e = estilo_juego(gid, "trivia", e, {"{tema}": nombre})
+    if img:  # la imagen de la pregunta tiene prioridad sobre la imagen fija del estilo
+        e.set_image(url=img)
+    return e
+
+
+async def jugar_trivia(msg: discord.Message, canal, tema: str, total: int, gid: int):
+    emoji, nombre = TEMAS[tema]
+    puntos, aciertos = {}, {}
+    try:
+        await asyncio.sleep(3)
+        banco = TRIVIA[tema]
+        preguntas = random.sample(banco, min(total, len(banco)))
+        pool = IMAGENES.get(tema) or []
+        for n, item in enumerate(preguntas, 1):
+            texto, correcta, m1, m2, m3, *resto = item
+            img = resto[0] if resto else (random.choice(pool) if pool else None)
+            opciones = [correcta, m1, m2, m3]
+            random.shuffle(opciones)
+            idx_ok = opciones.index(correcta)
+
+            view = TriviaPreguntaView()
+            await msg.edit(embed=embed_trivia(gid, tema, n, len(preguntas), texto, opciones, img), view=view)
+            await view.wait()
+
+            acertaron = []
+            for uid, (i, t) in view.respuestas.items():
+                if i == idx_ok:
+                    pts = 10 + max(0, int(TRIVIA_SEGUNDOS - t))  # 10 base + hasta 15 por rapidez
+                    puntos[uid] = puntos.get(uid, 0) + pts
+                    aciertos[uid] = aciertos.get(uid, 0) + 1
+                    acertaron.append((uid, pts))
+            if acertaron:
+                extra = "🎯 **Acertaron:** " + ", ".join(f"<@{u}> (+{p})" for u, p in acertaron[:10])
+            elif view.respuestas:
+                extra = "😅 Nadie acertó esta vez."
+            else:
+                extra = "💤 Nadie respondió."
+            await msg.edit(embed=embed_trivia(gid, tema, n, len(preguntas), texto, opciones, img, idx_ok, extra), view=None)
+            await asyncio.sleep(4)
+
+        if puntos:
+            orden = sorted(puntos.items(), key=lambda x: -x[1])[:10]
+            medallas = ["🥇", "🥈", "🥉"]
+            lineas = []
+            for pos, (uid, p) in enumerate(orden):
+                prefijo = medallas[pos] if pos < 3 else f"**{pos + 1}.**"
+                lineas.append(f"{prefijo} <@{uid}> — **{p}** pts · {aciertos[uid]}/{len(preguntas)} aciertos")
+            desc = f"{emoji} Tema: **{nombre}**\n\n" + "\n".join(lineas)
+            ganador = orden[0][0]
+        else:
+            desc = f"{emoji} Tema: **{nombre}**\n\nNadie participó 😴"
+            ganador = None
+        final = discord.Embed(title="🏁 Trivia finalizada", description=desc, color=0x2ECC71)
+        final = estilo_juego(gid, "trivia", final, {"{tema}": nombre}, titulo=False)
+        await msg.edit(embed=final, view=None)
+        if ganador:
+            await canal.send(f"🏆 ¡Felicidades <@{ganador}>, ganaste la trivia!")
+    except discord.NotFound:
+        pass  # borraron el mensaje: se cancela la partida
+    finally:
+        JUEGOS_ADIVINA.discard(canal.id)
+
+
+class TriviaTemaView(discord.ui.View):
+    def __init__(self, host, total: int):
+        super().__init__(timeout=60)
+        self.host, self.total = host, total
+        self.message = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.host.id:
+            await interaction.response.send_message("Solo quien ejecutó el comando puede elegir el tema.", ephemeral=True)
+            return False
+        return True
+
+    def embed(self):
+        return discord.Embed(
+            title="🧠 Trivia",
+            description=f"¿De qué quieres la trivia? Serán **{self.total} preguntas** de {TRIVIA_SEGUNDOS} s cada una.\n"
+            "Cualquiera del canal puede responder con los botones. Aciertas = puntos, y respondes más rápido = más puntos.",
+            color=0x3498DB,
+        )
+
+    @discord.ui.select(
+        placeholder="Elige la temática",
+        options=[discord.SelectOption(label=n, value=k, emoji=e) for k, (e, n) in TEMAS.items()],
+    )
+    async def tema(self, interaction: discord.Interaction, select: discord.ui.Select):
+        canal = interaction.channel
+        if canal.id in JUEGOS_ADIVINA:
+            return await interaction.response.send_message("Ya hay una partida en este canal.", ephemeral=True)
+        JUEGOS_ADIVINA.add(canal.id)
+        self.stop()
+        tema = select.values[0]
+        emoji, nombre = TEMAS[tema]
+        intro = discord.Embed(
+            title=f"🧠 Trivia — {nombre}",
+            description=f"{emoji} Tema: **{nombre}** · {self.total} preguntas\n¡Prepárense, empieza en 3 segundos!",
+            color=0x3498DB,
+        )
+        intro = estilo_juego(interaction.guild_id, "trivia", intro, {"{tema}": nombre})
+        await interaction.response.edit_message(embed=intro, view=None)
+        asyncio.create_task(jugar_trivia(interaction.message, canal, tema, self.total, interaction.guild_id))
+
+    async def on_timeout(self):
+        if self.message:
+            try:
+                await self.message.edit(content="⌛ No elegiste temática a tiempo.", embed=None, view=None)
+            except discord.HTTPException:
+                pass
+
+
+@tree.command(name="trivia", description="Trivia de Anime, Historia o Videojuegos (100 preguntas por tema)")
+@app_commands.describe(preguntas="Cuántas preguntas quieres (3-20, por defecto 10)")
+@app_commands.guild_only()
+async def trivia_cmd(interaction: discord.Interaction, preguntas: app_commands.Range[int, 3, 20] = 10):
+    if interaction.channel_id in JUEGOS_ADIVINA:
+        return await interaction.response.send_message("Ya hay una partida en este canal.", ephemeral=True)
+    view = TriviaTemaView(interaction.user, preguntas)
+    await interaction.response.send_message(embed=view.embed(), view=view)
+    view.message = await interaction.original_response()
+
+
+# ─────────────────────────────────── Sorteos ─────────────────────────────────
+SORT_VARIABLES = {
+    "{premio}": "Premio del sorteo",
+    "{num_ganadores}": "Cantidad de ganadores",
+    "{fin}": "Cuenta regresiva hasta que termina",
+    "{anfitrion}": "Quien creó el sorteo",
+    "{participantes}": "Cantidad de participantes",
+    "{ganadores}": "Ganadores (al finalizar)",
+    "{requisito}": "Rol requerido para participar",
+    "{servidor}": "Nombre del servidor",
+}
+
+
+def default_sort_embeds():
+    base = {"autor": None, "miniatura": None, "imagen": None, "footer": None}
+    return {
+        "sorteo": {
+            **base, "titulo": "🎉 SORTEO: {premio}",
+            "descripcion": "Pulsa el botón **Participar** para entrar.\n\n**Termina:** {fin}\n**Ganadores:** {num_ganadores}\n"
+            "**Requisito:** {requisito}\n**Organiza:** {anfitrion}\n**Participantes:** {participantes}",
+            "color": "F1C40F",
+        },
+        "final": {
+            **base, "titulo": "🏆 Sorteo finalizado: {premio}",
+            "descripcion": "**Ganadores:** {ganadores}\n**Participantes:** {participantes}\n**Organizó:** {anfitrion}",
+            "color": "2ECC71",
+        },
+    }
+
+
+def puede_sortear(member: discord.Member) -> bool:
+    s = cfg(member.guild.id)["sort"]
+    return member.guild_permissions.administrator or any(r.id in s["roles"] for r in member.roles)
+
+
+def parse_duracion(txt: str):
+    t = txt.lower().replace(" ", "")
+    partes = re.findall(r"(\d+)([smhd])", t)
+    if not partes or "".join(f"{n}{u}" for n, u in partes) != t:
+        return None
+    mult = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    return sum(int(n) * mult[u] for n, u in partes)
+
+
+def sort_vars(guild, rec, ganadores=None):
+    return {
+        "{num_ganadores}": str(rec["ganadores"]),
+        "{fin}": f"<t:{rec['fin']}:R>",
+        "{anfitrion}": f"<@{rec['anfitrion']}>",
+        "{participantes}": str(len(rec["participantes"])),
+        "{ganadores}": ganadores or "—",
+        "{requisito}": f"<@&{rec['requisito']}>" if rec.get("requisito") else "Ninguno",
+        "{servidor}": guild.name,
+        "{premio}": rec["premio"],  # al final para no re-sustituir variables escritas en el premio
+    }
+
+
+def build_sort_embed(guild, rec):
+    return post_embed(cfg(guild.id)["sort"]["embeds"]["sorteo"], sort_vars(guild, rec))
+
+
+class SorteoView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Participar", emoji="🎉", style=discord.ButtonStyle.success, custom_id="sort:join")
+    async def participar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        rec = cfg(interaction.guild.id)["sort"]["items"].get(str(interaction.message.id))
+        if not rec or rec["estado"] != "activo":
+            return await interaction.response.send_message("🔒 Este sorteo ya terminó.", ephemeral=True)
+        if rec.get("requisito") and rec["requisito"] not in [r.id for r in interaction.user.roles]:
+            return await interaction.response.send_message(f"❌ Necesitas el rol <@&{rec['requisito']}> para participar.", ephemeral=True)
+        uid = interaction.user.id
+        if uid in rec["participantes"]:
+            rec["participantes"].remove(uid)
+            texto = "👋 Saliste del sorteo."
+        else:
+            rec["participantes"].append(uid)
+            texto = "🎉 ¡Estás participando! Suerte."
+        save()
+        await interaction.response.edit_message(embed=build_sort_embed(interaction.guild, rec))
+        await interaction.followup.send(texto, ephemeral=True)
+
+
+async def anunciar_ganadores(guild, mid, rec, nuevos, reroll=False):
+    canal = guild.get_channel(rec["canal"])
+    if canal is None:
+        return
+    texto = " ".join(f"<@{u}>" for u in nuevos) or "Nadie participó 😢"
+    mensaje = (f"🔁 Nuevo ganador: {texto}. ¡Felicidades!" if reroll
+               else (f"🎉 ¡Felicidades {texto}! Ganaron **{rec['premio']}**." if nuevos else "😢 Nadie participó en el sorteo."))
+    permitidos = discord.AllowedMentions(users=True)
+    try:
+        msg = await canal.fetch_message(int(mid))
+        await msg.reply(mensaje, allowed_mentions=permitidos)
+    except discord.HTTPException:
+        await canal.send(mensaje, allowed_mentions=permitidos)
+
+
+async def finalizar_sorteo(guild, mid, rec):
+    s = cfg(guild.id)["sort"]
+    rec["estado"] = "finalizado"
+    validos = [u for u in rec["participantes"] if guild.get_member(u)]
+    ganadores = random.sample(validos, min(rec["ganadores"], len(validos)))
+    rec["ganadores_ids"] = ganadores
+    save()
+    texto = " ".join(f"<@{u}>" for u in ganadores) or "Nadie participó"
+    canal = guild.get_channel(rec["canal"])
+    if canal is None:
+        return
+    try:
+        msg = await canal.fetch_message(int(mid))
+        await msg.edit(embed=post_embed(s["embeds"]["final"], sort_vars(guild, rec, texto)), view=None)
+    except discord.HTTPException:
+        pass
+    await anunciar_ganadores(guild, mid, rec, ganadores)
+
+
+async def bucle_sorteos():
+    await client.wait_until_ready()
+    while not client.is_closed():
+        ahora = int(time.time())
+        for gid in list(data.keys()):
+            g = client.get_guild(int(gid))
+            s = data[gid].get("sort")
+            if not g or not s:
+                continue
+            for mid, rec in list(s["items"].items()):
+                if rec["estado"] == "activo" and rec["fin"] <= ahora:
+                    try:
+                        await finalizar_sorteo(g, mid, rec)
+                    except Exception as e:
+                        print("Error finalizando sorteo:", e)
+        await asyncio.sleep(15)
+
+
+sorteo = app_commands.Group(name="sorteo", description="Sistema de sorteos", guild_only=True)
+tree.add_command(sorteo)
+
+
+@sorteo.command(name="crear", description="Crea un sorteo")
+@app_commands.describe(
+    premio="Qué se sortea", duracion="Ej: 30m, 2h, 1d, 1h30m", ganadores="Cantidad de ganadores (por defecto 1)",
+    canal="Canal del sorteo (por defecto, este)", requisito="Rol necesario para participar (opcional)",
+)
+async def sorteo_crear(
+    interaction: discord.Interaction, premio: app_commands.Range[str, 1, 200], duracion: str,
+    ganadores: app_commands.Range[int, 1, 20] = 1, canal: Optional[discord.TextChannel] = None,
+    requisito: Optional[discord.Role] = None,
+):
+    if not puede_sortear(interaction.user):
+        return await interaction.response.send_message("❌ No tienes permiso para crear sorteos.", ephemeral=True)
+    seg = parse_duracion(duracion)
+    if seg is None or not 10 <= seg <= 30 * 86400:
+        return await interaction.response.send_message(
+            "❌ Duración inválida. Usa por ejemplo `30m`, `2h`, `1d` o `1h30m` (entre 10 segundos y 30 días).", ephemeral=True
+        )
+    destino = canal or interaction.channel
+    rec = {
+        "premio": premio, "ganadores": ganadores, "fin": int(time.time()) + seg, "anfitrion": interaction.user.id,
+        "canal": destino.id, "requisito": requisito.id if requisito else None, "participantes": [], "estado": "activo",
+    }
+    try:
+        msg = await destino.send(embed=build_sort_embed(interaction.guild, rec), view=SorteoView())
+    except discord.HTTPException:
+        return await interaction.response.send_message(f"❌ No puedo enviar mensajes en {destino.mention}.", ephemeral=True)
+    cfg(interaction.guild.id)["sort"]["items"][str(msg.id)] = rec
+    save()
+    await interaction.response.send_message(f"✅ Sorteo creado: {msg.jump_url}", ephemeral=True)
+
+
+def _opciones_sorteo(interaction, current, estado):
+    items = cfg(interaction.guild.id)["sort"]["items"]
+    out = []
+    for mid, rec in reversed(list(items.items())):
+        if rec["estado"] != estado:
+            continue
+        nombre = f"{rec['premio'][:70]} (#{mid[-4:]})"
+        if current.lower() in nombre.lower():
+            out.append(app_commands.Choice(name=nombre, value=mid))
+    return out[:25]
+
+
+@sorteo.command(name="finalizar", description="Termina un sorteo ahora y elige ganadores")
+@app_commands.describe(sorteo="Sorteo activo")
+async def sorteo_finalizar(interaction: discord.Interaction, sorteo: str):
+    if not puede_sortear(interaction.user):
+        return await interaction.response.send_message("❌ No tienes permiso para esto.", ephemeral=True)
+    rec = cfg(interaction.guild.id)["sort"]["items"].get(sorteo)
+    if not rec or rec["estado"] != "activo":
+        return await interaction.response.send_message("⚠️ Ese sorteo no existe o ya terminó.", ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
+    await finalizar_sorteo(interaction.guild, sorteo, rec)
+    await interaction.followup.send("✅ Sorteo finalizado.", ephemeral=True)
+
+
+@sorteo_finalizar.autocomplete("sorteo")
+async def ac_sorteo_activo(interaction: discord.Interaction, current: str):
+    return _opciones_sorteo(interaction, current, "activo")
+
+
+@sorteo.command(name="reroll", description="Elige un nuevo ganador de un sorteo terminado")
+@app_commands.describe(sorteo="Sorteo finalizado")
+async def sorteo_reroll(interaction: discord.Interaction, sorteo: str):
+    if not puede_sortear(interaction.user):
+        return await interaction.response.send_message("❌ No tienes permiso para esto.", ephemeral=True)
+    rec = cfg(interaction.guild.id)["sort"]["items"].get(sorteo)
+    if not rec or rec["estado"] != "finalizado":
+        return await interaction.response.send_message("⚠️ Ese sorteo no existe o aún no termina.", ephemeral=True)
+    previos = rec.get("ganadores_ids", [])
+    candidatos = [u for u in rec["participantes"] if u not in previos and interaction.guild.get_member(u)]
+    if not candidatos:
+        return await interaction.response.send_message("⚠️ No quedan participantes disponibles para un nuevo ganador.", ephemeral=True)
+    nuevo = random.choice(candidatos)
+    rec.setdefault("ganadores_ids", []).append(nuevo)
+    save()
+    await interaction.response.send_message("✅ Nuevo ganador elegido.", ephemeral=True)
+    await anunciar_ganadores(interaction.guild, sorteo, rec, [nuevo], reroll=True)
+
+
+@sorteo_reroll.autocomplete("sorteo")
+async def ac_sorteo_final(interaction: discord.Interaction, current: str):
+    return _opciones_sorteo(interaction, current, "finalizado")
+
+
+# ────────────────────────────────── Tickets ──────────────────────────────────
+TK_VARIABLES = {
+    "{usuario}": "Menciona a quien abrió el ticket",
+    "{numero}": "Número del ticket",
+    "{categoria}": "Categoría elegida",
+    "{staff}": "Staff que cierra el ticket",
+    "{servidor}": "Nombre del servidor",
+}
+
+
+def default_tk_embeds():
+    base = {"autor": None, "miniatura": None, "imagen": None, "footer": None}
+    return {
+        "panel": {**base, "titulo": "🎫 Soporte — {servidor}",
+                  "descripcion": "¿Necesitas ayuda? Elige una categoría en el menú de abajo y se abrirá un canal privado con el staff.",
+                  "color": "5865F2"},
+        "ticket": {**base, "titulo": "🎫 Ticket #{numero} — {categoria}",
+                   "descripcion": "Hola {usuario}, gracias por abrir un ticket. Cuéntanos tu consulta con el mayor detalle posible; el staff te atenderá pronto.",
+                   "color": "2ECC71"},
+        "cierre": {**base, "titulo": "🔒 Ticket #{numero} cerrado",
+                   "descripcion": "**Usuario:** {usuario}\n**Categoría:** {categoria}\n**Cerrado por:** {staff}",
+                   "color": "E74C3C"},
+    }
+
+
+def tk_vars(guild, rec=None, staff="—"):
+    return {
+        "{usuario}": f"<@{rec['usuario']}>" if rec else "—",
+        "{numero}": str(rec["numero"]) if rec else "—",
+        "{categoria}": rec["categoria"] if rec else "—",
+        "{staff}": staff,
+        "{servidor}": guild.name,
+    }
+
+
+def tk_es_staff(member, t) -> bool:
+    return member.guild_permissions.administrator or any(r.id in t["roles"] for r in member.roles)
+
+
+async def abrir_ticket(interaction: discord.Interaction, categoria: str):
+    g = interaction.guild
+    t = cfg(g.id)["tk"]
+    await interaction.response.defer(ephemeral=True)
+
+    propios = [r for r in t["abiertos"].values() if r["usuario"] == interaction.user.id]
+    if len(propios) >= t["max"]:
+        return await interaction.followup.send(
+            f"⚠️ Ya tienes {len(propios)} ticket(s) abierto(s): " + " ".join(f"<#{r['canal']}>" for r in propios), ephemeral=True
+        )
+    if not g.me.guild_permissions.manage_channels:
+        return await interaction.followup.send("❌ No tengo el permiso **Gestionar canales**.", ephemeral=True)
+
+    permisos_user = discord.PermissionOverwrite(
+        view_channel=True, send_messages=True, read_message_history=True, attach_files=True, embed_links=True
+    )
+    overwrites = {
+        g.default_role: discord.PermissionOverwrite(view_channel=False),
+        interaction.user: permisos_user,
+        g.me: discord.PermissionOverwrite(
+            view_channel=True, send_messages=True, manage_channels=True, manage_messages=True,
+            embed_links=True, attach_files=True, read_message_history=True,
+        ),
+    }
+    for rid in t["roles"]:
+        rol = g.get_role(rid)
+        if rol:
+            overwrites[rol] = discord.PermissionOverwrite(
+                view_channel=True, send_messages=True, read_message_history=True, attach_files=True,
+                embed_links=True, manage_messages=True,
+            )
+    cat = g.get_channel(t["categoria"]) if t["categoria"] else None
+    t["contador"] += 1
+    n = t["contador"]
+    try:
+        canal = await g.create_text_channel(
+            f"ticket-{n:04d}", category=cat, overwrites=overwrites,
+            topic=f"Ticket #{n} · {interaction.user} ({interaction.user.id}) · {categoria}",
+            reason=f"[Nexus] Ticket de {interaction.user}",
+        )
+    except discord.HTTPException as e:
+        t["contador"] -= 1
+        return await interaction.followup.send(f"❌ No pude crear el canal: {e.text or e}", ephemeral=True)
+
+    rec = {"numero": n, "usuario": interaction.user.id, "categoria": categoria, "canal": canal.id, "reclamado": None}
+    t["abiertos"][str(canal.id)] = rec
+    save()
+    ping = " ".join(f"<@&{r}>" for r in t["roles"])
+    await canal.send(
+        content=f"{interaction.user.mention} {ping}".strip(),
+        embed=post_embed(t["embeds"]["ticket"], tk_vars(g, rec)),
+        view=TicketControlView(),
+        allowed_mentions=discord.AllowedMentions(users=True, roles=True),
+    )
+    await interaction.followup.send(f"✅ Tu ticket está listo: {canal.mention}", ephemeral=True)
+    try:  # reinicia el menú del panel para que se pueda volver a elegir
+        await interaction.message.edit(view=TicketPanelView(t["cats"]))
+    except discord.HTTPException:
+        pass
+
+
+class TicketSelect(discord.ui.Select):
+    def __init__(self, opciones):
+        super().__init__(custom_id="tk:open", placeholder="🎫 Elige una categoría para abrir un ticket", options=opciones)
+
+    async def callback(self, interaction: discord.Interaction):
+        await abrir_ticket(interaction, self.values[0])
+
+
+class TicketPanelView(discord.ui.View):
+    def __init__(self, cats=None):
+        super().__init__(timeout=None)
+        cats = cats or [{"nombre": "Soporte", "desc": "Ayuda general"}]
+        self.add_item(TicketSelect([
+            discord.SelectOption(label=c["nombre"][:100], value=c["nombre"][:100], description=(c.get("desc") or "")[:100] or None)
+            for c in cats[:25]
+        ]))
+
+
+async def cerrar_ticket(interaction: discord.Interaction, rec, razon):
+    g = interaction.guild
+    t = cfg(g.id)["tk"]
+    canal = interaction.channel
+    await interaction.response.send_message("🔒 Cerrando el ticket y guardando la transcripción... el canal se eliminará en unos segundos.")
+
+    lineas = []
+    async for m in canal.history(limit=1000, oldest_first=True):
+        texto = m.content
+        for e in m.embeds:
+            partes = [x for x in (e.title, e.description) if x]
+            if partes:
+                texto += f" [embed: {' - '.join(partes)}]"
+        for a in m.attachments:
+            texto += f" [adjunto: {a.url}]"
+        lineas.append(f"[{m.created_at:%Y-%m-%d %H:%M}] {m.author} ({m.author.id}): {texto.strip()}")
+    datos = ("\n".join(lineas) or "(sin mensajes)").encode("utf-8")
+    nombre = f"transcripcion-ticket-{rec['numero']:04d}.txt"
+    vars_ = tk_vars(g, rec, staff=interaction.user.mention)
+
+    def embed_cierre():
+        e = post_embed(t["embeds"]["cierre"], vars_)
+        if razon:
+            e.add_field(name="Razón", value=razon[:1000], inline=False)
+        if rec.get("reclamado"):
+            e.add_field(name="Reclamado por", value=f"<@{rec['reclamado']}>", inline=True)
+        return e
+
+    log = g.get_channel(t["canal"]) if t["canal"] else None
+    if log:
+        try:
+            await log.send(embed=embed_cierre(), file=discord.File(io.BytesIO(datos), filename=nombre))
+        except discord.HTTPException:
+            pass
+    try:
+        dueno = await client.fetch_user(rec["usuario"])
+        await dueno.send(embed=embed_cierre(), file=discord.File(io.BytesIO(datos), filename=nombre))
+    except discord.HTTPException:
+        pass
+
+    t["abiertos"].pop(str(canal.id), None)
+    save()
+    await asyncio.sleep(4)
+    try:
+        await canal.delete(reason=f"[Nexus] Ticket #{rec['numero']} cerrado por {interaction.user}")
+    except discord.HTTPException:
+        pass
+
+
+class TkCierreModal(discord.ui.Modal, title="Cerrar ticket"):
+    def __init__(self, rec):
+        super().__init__()
+        self.rec = rec
+        self.razon = discord.ui.TextInput(label="Razón de cierre (opcional)", style=discord.TextStyle.paragraph, required=False, max_length=500)
+        self.add_item(self.razon)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await cerrar_ticket(interaction, self.rec, self.razon.value)
+
+
+class TkUserView(discord.ui.View):
+    def __init__(self, canal, agregar: bool, dueno: int):
+        super().__init__(timeout=60)
+        self.canal, self.agregar, self.dueno = canal, agregar, dueno
+
+    @discord.ui.select(cls=discord.ui.UserSelect, placeholder="Elige a la(s) persona(s)", min_values=1, max_values=5)
+    async def elegir(self, interaction: discord.Interaction, select: discord.ui.UserSelect):
+        nombres = []
+        for u in select.values:
+            if self.agregar:
+                await self.canal.set_permissions(
+                    u, view_channel=True, send_messages=True, read_message_history=True, attach_files=True
+                )
+                nombres.append(u.mention)
+            elif u.id != self.dueno:
+                await self.canal.set_permissions(u, overwrite=None)
+                nombres.append(u.mention)
+        await interaction.response.edit_message(content="✅ Listo.", view=None)
+        if nombres:
+            accion = "agregó a" if self.agregar else "quitó a"
+            await self.canal.send(f"👥 {interaction.user.mention} {accion} {', '.join(nombres)}.", allowed_mentions=discord.AllowedMentions.none())
+
+
+class TicketControlView(discord.ui.View):
+    def __init__(self, reclamado: bool = False):
+        super().__init__(timeout=None)
+        if reclamado:
+            self.reclamar.disabled = True
+
+    def _ctx(self, interaction):
+        t = cfg(interaction.guild.id)["tk"]
+        return t, t["abiertos"].get(str(interaction.channel.id))
+
+    @discord.ui.button(label="Cerrar", emoji="🔒", style=discord.ButtonStyle.danger, custom_id="tk:close")
+    async def cerrar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        t, rec = self._ctx(interaction)
+        if not rec:
+            return await interaction.response.send_message("❌ Este ticket ya no está registrado.", ephemeral=True)
+        if not (tk_es_staff(interaction.user, t) or interaction.user.id == rec["usuario"]):
+            return await interaction.response.send_message("❌ Solo el staff o quien abrió el ticket puede cerrarlo.", ephemeral=True)
+        await interaction.response.send_modal(TkCierreModal(rec))
+
+    @discord.ui.button(label="Reclamar", emoji="🙋", style=discord.ButtonStyle.primary, custom_id="tk:claim")
+    async def reclamar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        t, rec = self._ctx(interaction)
+        if not rec:
+            return await interaction.response.send_message("❌ Este ticket ya no está registrado.", ephemeral=True)
+        if not tk_es_staff(interaction.user, t):
+            return await interaction.response.send_message("❌ Solo el staff puede reclamar tickets.", ephemeral=True)
+        if rec.get("reclamado"):
+            return await interaction.response.send_message(f"Ya lo reclamó <@{rec['reclamado']}>.", ephemeral=True)
+        rec["reclamado"] = interaction.user.id
+        save()
+        e = interaction.message.embeds[0].copy()
+        e.add_field(name="🙋 Reclamado por", value=interaction.user.mention, inline=False)
+        await interaction.response.edit_message(embed=e, view=TicketControlView(reclamado=True))
+
+    @discord.ui.button(label="Agregar", emoji="➕", style=discord.ButtonStyle.secondary, custom_id="tk:add")
+    async def agregar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        t, rec = self._ctx(interaction)
+        if not rec or not tk_es_staff(interaction.user, t):
+            return await interaction.response.send_message("❌ Solo el staff puede hacer esto.", ephemeral=True)
+        await interaction.response.send_message("¿A quién quieres agregar al ticket?", view=TkUserView(interaction.channel, True, rec["usuario"]), ephemeral=True)
+
+    @discord.ui.button(label="Quitar", emoji="➖", style=discord.ButtonStyle.secondary, custom_id="tk:rem")
+    async def quitar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        t, rec = self._ctx(interaction)
+        if not rec or not tk_es_staff(interaction.user, t):
+            return await interaction.response.send_message("❌ Solo el staff puede hacer esto.", ephemeral=True)
+        await interaction.response.send_message("¿A quién quieres quitar del ticket?", view=TkUserView(interaction.channel, False, rec["usuario"]), ephemeral=True)
+
+
+@tree.command(name="ticket-panel", description="Envía el panel para que abran tickets")
+@app_commands.describe(canal="Canal donde se enviará el panel (por defecto, este)")
+@app_commands.default_permissions(administrator=True)
+@app_commands.guild_only()
+async def ticket_panel(interaction: discord.Interaction, canal: Optional[discord.TextChannel] = None):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
+    t = cfg(interaction.guild.id)["tk"]
+    destino = canal or interaction.channel
+    try:
+        await destino.send(embed=post_embed(t["embeds"]["panel"], tk_vars(interaction.guild)), view=TicketPanelView(t["cats"]))
+    except discord.HTTPException:
+        return await interaction.response.send_message(f"❌ No puedo enviar mensajes en {destino.mention}.", ephemeral=True)
+    aviso = "" if t["roles"] else "\n⚠️ Aún no configuraste roles de staff en `/configuracion → Tickets`."
+    await interaction.response.send_message(f"✅ Panel enviado en {destino.mention}.{aviso}", ephemeral=True)
+
+
 # ───────────────────────────── /configuracion ────────────────────────────────
 SECCIONES = {
     "sugerencias": ("💡", "Sugerencias", "Canal y roles que aprueban"),
@@ -1917,6 +2786,7 @@ SECCIONES = {
     "moderacion": ("🔨", "Moderación", "Sanciones, casos y registros"),
     "juegos": ("🎮", "Juegos", "Editar embeds de los juegos"),
     "tickets": ("🎫", "Tickets", "Canales privados de soporte"),
+    "sorteos": ("🎁", "Sorteos", "Roles y embeds de sorteos"),
 }
 
 
@@ -1970,6 +2840,10 @@ class Menu(discord.ui.Select):
         k = self.values[0]
         if k == "sugerencias":
             return await interaction.response.edit_message(embed=sug_embed(interaction.guild.id), view=SugView())
+        if k == "tickets":
+            return await interaction.response.edit_message(embed=tk_home_embed(interaction.guild.id), view=TkHomeView())
+        if k == "sorteos":
+            return await interaction.response.edit_message(embed=sort_home_embed(interaction.guild.id), view=SortHomeView())
         if k == "juegos":
             return await interaction.response.edit_message(embed=juegos_menu_embed(), view=JuegosMenuView())
         if k == "seguridad":
@@ -2845,6 +3719,10 @@ JUEGOS_EMBED_NOMBRES = {
     "dado": "Dado",
     "tres_raya": "Tres en raya",
     "adivina": "Adivina la palabra",
+    "numero": "Adivina el número",
+    "desordenada": "Palabra desordenada",
+    "reflejos": "Duelo de reflejos",
+    "trivia": "Trivia",
 }
 
 
@@ -2853,7 +3731,7 @@ def juegos_menu_embed():
         title="🎮 Embeds de los juegos",
         description="Elige el juego cuyo embed quieres editar:\n\n" + "\n".join(f"• **{v}**" for v in JUEGOS_EMBED_NOMBRES.values())
         + "\n\nPuedes cambiar título, autor, color, pie de página y las imágenes. "
-        "En el título del dado puedes usar `{caras}` y en el de adivina la palabra `{tema}`.",
+        "En el título del dado puedes usar `{caras}` y en el de adivina la palabra, la palabra desordenada y la trivia, `{tema}`.",
         color=0x5865F2,
     )
 
@@ -2888,6 +3766,254 @@ class JuegosMenuView(AdminView):
         await interaction.response.edit_message(embed=home_embed(), view=HomeView())
 
 
+# ───────────────────────── Config: Sorteos ─────────────────────────
+SORT_EMBED_NOMBRES = {"sorteo": "Embed del sorteo (activo)", "final": "Embed del sorteo finalizado"}
+
+
+def sort_home_embed(gid: int):
+    s = cfg(gid)["sort"]
+    e = discord.Embed(title="🎁 Configurar sorteos", color=0x5865F2)
+    e.add_field(name="Roles que pueden crear sorteos",
+                value=" ".join(f"<@&{r}>" for r in s["roles"]) or "Solo administradores", inline=False)
+    e.add_field(name="Sorteos activos", value=str(sum(1 for r in s["items"].values() if r["estado"] == "activo")), inline=True)
+    e.add_field(name="Sorteos realizados", value=str(len(s["items"])), inline=True)
+    e.set_footer(text="Comandos: /sorteo crear · /sorteo finalizar · /sorteo reroll")
+    return e
+
+
+def sort_embeds_menu_embed():
+    return discord.Embed(
+        title="🎨 Embeds de sorteos",
+        description="Elige cuál quieres editar:\n\n" + "\n".join(f"• **{v}**" for v in SORT_EMBED_NOMBRES.values()),
+        color=0x5865F2,
+    )
+
+
+def sort_embed_panel(guild, user_id: int, key: str):
+    s = cfg(guild.id)["sort"]
+    info = discord.Embed(
+        title=f"🎨 Editando: {SORT_EMBED_NOMBRES[key]}",
+        description="Variables: " + ", ".join(f"`{k}`" for k in SORT_VARIABLES) + "\n\nAbajo ves la vista previa en vivo.",
+        color=0x5865F2,
+    )
+    rec = {"premio": "Nitro Classic", "ganadores": 1, "fin": int(time.time()) + 3600, "anfitrion": user_id,
+           "participantes": [user_id], "requisito": None}
+    return [info, post_embed(s["embeds"][key], sort_vars(guild, rec, f"<@{user_id}>"))]
+
+
+async def volver_sort_menu(interaction: discord.Interaction):
+    await interaction.response.edit_message(embed=sort_embeds_menu_embed(), view=SortEmbedsMenuView())
+
+
+class SortEmbedsMenuView(AdminView):
+    @discord.ui.select(
+        placeholder="¿Qué embed quieres editar?",
+        options=[discord.SelectOption(label=v, value=k) for k, v in SORT_EMBED_NOMBRES.items()],
+        row=0,
+    )
+    async def elegir(self, interaction: discord.Interaction, select: discord.ui.Select):
+        key = select.values[0]
+        view = StyleEditView("sort", key, sort_embed_panel, volver_sort_menu)
+        await interaction.response.edit_message(embeds=sort_embed_panel(interaction.guild, interaction.user.id, key), view=view)
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=1)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=sort_home_embed(interaction.guild.id), view=SortHomeView())
+
+
+class SortHomeView(AdminView):
+    @discord.ui.select(cls=discord.ui.RoleSelect, min_values=0, max_values=10,
+                       placeholder="Roles que pueden crear sorteos", row=0)
+    async def roles(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        cfg(interaction.guild.id)["sort"]["roles"] = [r.id for r in select.values]
+        save()
+        await interaction.response.edit_message(embed=sort_home_embed(interaction.guild.id), view=SortHomeView())
+
+    @discord.ui.button(label="🎨 Embeds", style=discord.ButtonStyle.primary, row=1)
+    async def embeds(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=sort_embeds_menu_embed(), view=SortEmbedsMenuView())
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=1)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=home_embed(), view=HomeView())
+
+
+# ───────────────────────── Config: Tickets ─────────────────────────
+TK_EMBED_NOMBRES = {
+    "panel": "Panel (menú de categorías)",
+    "ticket": "Mensaje dentro del ticket",
+    "cierre": "Registro de cierre (canal y MD)",
+}
+
+
+def tk_home_embed(gid: int):
+    t = cfg(gid)["tk"]
+    e = discord.Embed(title="🎫 Configurar tickets", color=0x5865F2)
+    e.add_field(name="Categoría de Discord para los canales", value=f"<#{t['categoria']}>" if t["categoria"] else "Sin categoría (se crean sueltos)", inline=False)
+    e.add_field(name="Canal de registros / transcripciones", value=f"<#{t['canal']}>" if t["canal"] else "No configurado", inline=False)
+    e.add_field(name="Roles de staff", value=" ".join(f"<@&{r}>" for r in t["roles"]) or "Solo administradores", inline=False)
+    e.add_field(name="Tickets abiertos por usuario", value=f"máx. {t['max']}", inline=True)
+    e.add_field(name="Tickets abiertos ahora", value=str(len(t["abiertos"])), inline=True)
+    e.add_field(name="Categorías del menú", value=", ".join(c["nombre"] for c in t["cats"]), inline=False)
+    e.set_footer(text="Cuando termines, usa /ticket-panel para enviar el panel a un canal.")
+    return e
+
+
+def tk_cats_embed(gid: int):
+    t = cfg(gid)["tk"]
+    e = discord.Embed(title="📋 Categorías de tickets", color=0x5865F2)
+    for c in t["cats"]:
+        e.add_field(name=c["nombre"], value=c.get("desc") or "—", inline=False)
+    e.set_footer(text="Tras cambiar categorías, vuelve a enviar el panel con /ticket-panel. Máximo 10.")
+    return e
+
+
+def tk_embeds_menu_embed():
+    return discord.Embed(
+        title="🎨 Embeds de tickets",
+        description="Elige cuál quieres editar:\n\n" + "\n".join(f"• **{v}**" for v in TK_EMBED_NOMBRES.values()),
+        color=0x5865F2,
+    )
+
+
+def tk_embed_panel(guild, user_id: int, key: str):
+    t = cfg(guild.id)["tk"]
+    info = discord.Embed(
+        title=f"🎨 Editando: {TK_EMBED_NOMBRES[key]}",
+        description="Variables: " + ", ".join(f"`{k}`" for k in TK_VARIABLES) + "\n\nAbajo ves la vista previa en vivo.",
+        color=0x5865F2,
+    )
+    rec = {"numero": 1, "usuario": user_id, "categoria": t["cats"][0]["nombre"]}
+    return [info, post_embed(t["embeds"][key], tk_vars(guild, rec, staff=f"<@{user_id}>"))]
+
+
+async def volver_tk_menu(interaction: discord.Interaction):
+    await interaction.response.edit_message(embed=tk_embeds_menu_embed(), view=TkEmbedsMenuView())
+
+
+class TkEmbedsMenuView(AdminView):
+    @discord.ui.select(
+        placeholder="¿Qué embed quieres editar?",
+        options=[discord.SelectOption(label=v, value=k) for k, v in TK_EMBED_NOMBRES.items()],
+        row=0,
+    )
+    async def elegir(self, interaction: discord.Interaction, select: discord.ui.Select):
+        key = select.values[0]
+        view = StyleEditView("tk", key, tk_embed_panel, volver_tk_menu)
+        await interaction.response.edit_message(embeds=tk_embed_panel(interaction.guild, interaction.user.id, key), view=view)
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=1)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=tk_home_embed(interaction.guild.id), view=TkHomeView())
+
+
+class TkCatModal(discord.ui.Modal, title="Agregar categoría"):
+    def __init__(self):
+        super().__init__()
+        self.nombre = discord.ui.TextInput(label="Nombre de la categoría", max_length=50, placeholder="Ej: Reportes")
+        self.desc = discord.ui.TextInput(label="Descripción (opcional)", required=False, max_length=100)
+        self.add_item(self.nombre)
+        self.add_item(self.desc)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        t = cfg(interaction.guild.id)["tk"]
+        nombre = self.nombre.value.strip()
+        existente = next((c for c in t["cats"] if c["nombre"].lower() == nombre.lower()), None)
+        if existente:
+            existente["desc"] = self.desc.value.strip()
+        elif len(t["cats"]) >= 10:
+            return await interaction.response.send_message("❌ Máximo 10 categorías.", ephemeral=True)
+        else:
+            t["cats"].append({"nombre": nombre, "desc": self.desc.value.strip()})
+        save()
+        await interaction.response.edit_message(embed=tk_cats_embed(interaction.guild.id), view=TkCatsView(interaction.guild.id))
+
+
+class TkCatDelSelect(discord.ui.Select):
+    def __init__(self, cats):
+        super().__init__(placeholder="🗑️ Eliminar una categoría",
+                         options=[discord.SelectOption(label=c["nombre"][:100], value=c["nombre"][:100]) for c in cats], row=0)
+
+    async def callback(self, interaction: discord.Interaction):
+        t = cfg(interaction.guild.id)["tk"]
+        if len(t["cats"]) <= 1:
+            return await interaction.response.send_message("❌ Debe quedar al menos una categoría.", ephemeral=True)
+        t["cats"] = [c for c in t["cats"] if c["nombre"][:100] != self.values[0]]
+        save()
+        await interaction.response.edit_message(embed=tk_cats_embed(interaction.guild.id), view=TkCatsView(interaction.guild.id))
+
+
+class TkCatsView(AdminView):
+    def __init__(self, gid: int):
+        super().__init__()
+        self.add_item(TkCatDelSelect(cfg(gid)["tk"]["cats"][:25]))
+
+    @discord.ui.button(label="➕ Agregar categoría", style=discord.ButtonStyle.success, row=1)
+    async def agregar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(TkCatModal())
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=1)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=tk_home_embed(interaction.guild.id), view=TkHomeView())
+
+
+class TkMaxModal(discord.ui.Modal, title="Tickets por usuario"):
+    def __init__(self, gid: int):
+        super().__init__()
+        self.valor = discord.ui.TextInput(label="Máx. tickets abiertos por usuario (1-5)", default=str(cfg(gid)["tk"]["max"]), max_length=1)
+        self.add_item(self.valor)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            v = int(self.valor.value)
+            if not 1 <= v <= 5:
+                raise ValueError
+        except ValueError:
+            return await interaction.response.send_message("❌ Escribe un número del 1 al 5.", ephemeral=True)
+        cfg(interaction.guild.id)["tk"]["max"] = v
+        save()
+        await interaction.response.edit_message(embed=tk_home_embed(interaction.guild.id), view=TkHomeView())
+
+
+class TkHomeView(AdminView):
+    @discord.ui.select(cls=discord.ui.ChannelSelect, channel_types=[discord.ChannelType.category],
+                       placeholder="Categoría de Discord donde se crean los tickets", row=0)
+    async def categoria(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        cfg(interaction.guild.id)["tk"]["categoria"] = select.values[0].id
+        save()
+        await interaction.response.edit_message(embed=tk_home_embed(interaction.guild.id), view=TkHomeView())
+
+    @discord.ui.select(cls=discord.ui.ChannelSelect, channel_types=[discord.ChannelType.text],
+                       placeholder="Canal de registros / transcripciones", row=1)
+    async def canal(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        cfg(interaction.guild.id)["tk"]["canal"] = select.values[0].id
+        save()
+        await interaction.response.edit_message(embed=tk_home_embed(interaction.guild.id), view=TkHomeView())
+
+    @discord.ui.select(cls=discord.ui.RoleSelect, min_values=0, max_values=10,
+                       placeholder="Roles de staff que atienden tickets", row=2)
+    async def roles(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        cfg(interaction.guild.id)["tk"]["roles"] = [r.id for r in select.values]
+        save()
+        await interaction.response.edit_message(embed=tk_home_embed(interaction.guild.id), view=TkHomeView())
+
+    @discord.ui.button(label="📋 Categorías", style=discord.ButtonStyle.primary, row=3)
+    async def cats(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=tk_cats_embed(interaction.guild.id), view=TkCatsView(interaction.guild.id))
+
+    @discord.ui.button(label="🎨 Embeds", style=discord.ButtonStyle.primary, row=3)
+    async def embeds(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=tk_embeds_menu_embed(), view=TkEmbedsMenuView())
+
+    @discord.ui.button(label="⚙️ Máx. por usuario", style=discord.ButtonStyle.secondary, row=3)
+    async def maximo(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(TkMaxModal(interaction.guild.id))
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=3)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=home_embed(), view=HomeView())
+
+
 @tree.command(name="configuracion", description="Panel de configuración de Nexus")
 @app_commands.default_permissions(administrator=True)
 @app_commands.guild_only()
@@ -2908,7 +4034,7 @@ async def help_cmd(interaction: discord.Interaction):
     )
     embed.add_field(
         name="🎮 Juegos",
-        value="`/ppt @usuario` — piedra, papel o tijera (ambos eligen en secreto)\n`/dado [caras]` — dado de 2 a 16 caras\n`/tres-en-raya @usuario` — tres en raya para 2 jugadores\n`/adivina-la-palabra` — 2 a 4 jugadores con temática (Anime, Historia o Videojuegos)",
+        value="`/ppt @usuario` — piedra, papel o tijera (ambos eligen en secreto)\n`/dado [caras]` — dado de 2 a 16 caras\n`/tres-en-raya @usuario` — tres en raya para 2 jugadores\n`/adivina-la-palabra` — 2 a 4 jugadores con temática (Anime, Historia o Videojuegos)\n`/trivia [preguntas]` — Anime, Historia o Videojuegos (100 preguntas por tema, con imagen)\n`/adivina-el-numero` · `/palabra-desordenada` · `/reflejos @usuario`",
         inline=False,
     )
     embed.add_field(
@@ -2943,7 +4069,18 @@ async def help_cmd(interaction: discord.Interaction):
         "**Anti-Raid**, **Anti-Spam** y **White-List**. Cada uno tiene su propio panel.",
         inline=False,
     )
-    embed.add_field(name="🚧 Próximamente", value="Sistema de **tickets** (ya aparece en `/configuracion`).", inline=False)
+    embed.add_field(
+        name="🎫 Tickets",
+        value="Configura staff, categorías y embeds en `/configuracion → Tickets` y envía el panel con `/ticket-panel`. "
+        "Cada ticket es un canal privado con botones para reclamar, agregar/quitar personas y cerrar (se guarda la transcripción).",
+        inline=False,
+    )
+    embed.add_field(
+        name="🎁 Sorteos",
+        value="`/sorteo crear` (premio, duración, ganadores, requisito) · `/sorteo finalizar` · `/sorteo reroll`\n"
+        "Roles y embeds en `/configuracion → Sorteos`.",
+        inline=False,
+    )
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
