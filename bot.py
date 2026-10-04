@@ -1,5 +1,6 @@
 import os
 import json
+import asyncio
 import random
 from typing import Optional
 import discord
@@ -22,6 +23,10 @@ def save():
 def cfg(guild_id):
     g = data.setdefault(str(guild_id), {})
     g.setdefault("sug", {"canal": None, "roles": [], "items": {}})
+    g.setdefault("post", {
+        "forms": {}, "roles_enviar": [], "roles_revisar": [], "canal": None,
+        "contador": 0, "pend": {}, "rev": {}, "embeds": default_post_embeds(),
+    })
     g.setdefault("ev", {
         "roles": [],
         "activos": {},
@@ -44,6 +49,8 @@ class Nexus(discord.Client):
     async def setup_hook(self):
         self.add_view(SugerenciaView())  # botones persistentes tras reiniciar
         self.add_view(EventoView())
+        self.add_view(PostulaView())
+        self.add_view(ReviewView())
         await self.tree.sync()
 
 
@@ -485,6 +492,333 @@ async def ac_finalizar(interaction: discord.Interaction, current: str):
     return await eventos_ac(interaction, current, "iniciado")
 
 
+# ─────────────────────────────── Postulaciones ───────────────────────────────
+ACTIVAS = set()  # ids de mensajes públicos con un formulario en curso (en memoria)
+
+VARIABLES = {
+    "{candidato}": "Menciona a la persona que se postula",
+    "{numero}": "Número de la postulación",
+    "{ejecutor}": "Quien ejecutó el comando /postulacion",
+    "{formulario}": "Nombre del formulario",
+    "{servidor}": "Nombre del servidor",
+    "{staff}": "Staff que aprobó/rechazó (solo en respuestas y MD)",
+    "{estado}": "Estado de la postulación",
+    "{nota}": "Nota del staff (solo en respuestas y MD)",
+}
+
+
+def default_post_embeds():
+    return {
+        "publica": {
+            "titulo": "📝 Postulación #{numero}",
+            "autor": "{servidor}",
+            "descripcion": "{candidato} fue invitado a completar el formulario **{formulario}**.\n"
+            "Solicitado por {ejecutor}.\n\nPulsa el botón para comenzar. Solo el candidato puede iniciarlo.",
+            "color": "5865F2", "miniatura": None, "imagen": None, "footer": None,
+        },
+        "respuestas": {
+            "titulo": "📋 Postulación #{numero} — {formulario}",
+            "autor": None,
+            "descripcion": "**Candidato:** {candidato}\n**Solicitada por:** {ejecutor}\n**Estado:** {estado}",
+            "color": "F1C40F", "miniatura": None, "imagen": None, "footer": None,
+        },
+        "aprobada": {
+            "titulo": "✅ Tu postulación fue aprobada",
+            "autor": "{servidor}",
+            "descripcion": "Hola {candidato}, tu postulación **#{numero}** ({formulario}) en **{servidor}** "
+            "fue **aprobada** por {staff}.\n\n**Nota:** {nota}",
+            "color": "2ECC71", "miniatura": None, "imagen": None, "footer": None,
+        },
+        "rechazada": {
+            "titulo": "❌ Tu postulación fue rechazada",
+            "autor": "{servidor}",
+            "descripcion": "Hola {candidato}, tu postulación **#{numero}** ({formulario}) en **{servidor}** "
+            "fue **rechazada** por {staff}.\n\n**Nota:** {nota}",
+            "color": "E74C3C", "miniatura": None, "imagen": None, "footer": None,
+        },
+    }
+
+
+def puede_enviar(member: discord.Member) -> bool:
+    p = cfg(member.guild.id)["post"]
+    return member.guild_permissions.administrator or any(r.id in p["roles_enviar"] for r in member.roles)
+
+
+def puede_revisar(member: discord.Member) -> bool:
+    p = cfg(member.guild.id)["post"]
+    return member.guild_permissions.administrator or any(r.id in p["roles_revisar"] for r in member.roles)
+
+
+def post_vars(guild, rec, estado="⏳ Pendiente", staff="—", nota="—"):
+    return {
+        "{candidato}": f"<@{rec['candidato']}>",
+        "{numero}": str(rec["numero"]),
+        "{ejecutor}": f"<@{rec['ejecutor']}>",
+        "{formulario}": rec["formulario"],
+        "{servidor}": guild.name,
+        "{estado}": estado,
+        "{staff}": staff,
+        "{nota}": nota,
+    }
+
+
+def render(texto, vars):
+    if not texto:
+        return texto
+    for k, v in vars.items():
+        texto = texto.replace(k, v)
+    return texto
+
+
+def post_embed(st: dict, vars: dict) -> discord.Embed:
+    try:
+        color = int(st["color"].lstrip("#"), 16)
+    except ValueError:
+        color = 0x5865F2
+    e = discord.Embed(
+        title=(render(st.get("titulo"), vars) or None),
+        description=(render(st.get("descripcion"), vars) or None),
+        color=color,
+    )
+    if st.get("autor"):
+        e.set_author(name=render(st["autor"], vars)[:256])
+    if st.get("miniatura"):
+        e.set_thumbnail(url=st["miniatura"])
+    if st.get("imagen"):
+        e.set_image(url=st["imagen"])
+    if st.get("footer"):
+        e.set_footer(text=render(st["footer"], vars)[:2048])
+    return e
+
+
+def build_resp_embed(guild, rec, vars=None) -> discord.Embed:
+    vars = vars or post_vars(guild, rec)
+    e = post_embed(cfg(guild.id)["post"]["embeds"]["respuestas"], vars)
+    for q, a in rec["respuestas"]:
+        e.add_field(name=q[:256], value=a[:1024] or "—", inline=False)
+    return e
+
+
+async def run_form(guild, pub_msg, rec, user, intro):
+    """Hace las preguntas por MD una por una y envía todo al canal del staff."""
+    p = cfg(guild.id)["post"]
+    borrar = [intro]
+    respuestas = []
+    n = len(rec["preguntas"])
+
+    async def limpiar():
+        for m in borrar:
+            try:
+                await m.delete()
+            except discord.HTTPException:
+                pass
+
+    async def abortar(texto):
+        await limpiar()
+        try:
+            await user.send(texto)
+        except discord.HTTPException:
+            pass
+
+    try:
+        for i, q in enumerate(rec["preguntas"], 1):
+            emb = discord.Embed(title=f"📝 Pregunta {i}/{n}", description=q, color=0x5865F2)
+            emb.set_footer(text="Responde en un mensaje (máx. 400 caracteres) · Escribe 'cancelar' para salir")
+            borrar.append(await user.send(embed=emb))
+            while True:
+                try:
+                    resp = await client.wait_for(
+                        "message",
+                        check=lambda x: x.author.id == user.id and x.channel.id == intro.channel.id,
+                        timeout=600,
+                    )
+                except asyncio.TimeoutError:
+                    return await abortar("⌛ Se acabó el tiempo. Pulsa de nuevo **Iniciar formulario** para reintentar.")
+                if resp.content.strip().lower() == "cancelar":
+                    return await abortar("🚫 Formulario cancelado. Puedes volver a pulsar **Iniciar formulario**.")
+                texto = resp.content.strip()
+                if resp.attachments:
+                    texto = (texto + "\n" + "\n".join(a.url for a in resp.attachments)).strip()
+                if not texto:
+                    borrar.append(await user.send("✏️ Escribe tu respuesta en texto."))
+                    continue
+                if len(texto) > 400:
+                    borrar.append(await user.send(f"⚠️ Tu respuesta tiene {len(texto)} caracteres; el máximo es 400. Envíala más corta."))
+                    continue
+                break
+            respuestas.append([q, texto])
+    except discord.HTTPException:
+        return
+    finally:
+        ACTIVAS.discard(pub_msg.id)
+
+    canal = guild.get_channel(p["canal"]) if p["canal"] else None
+    if canal is None:
+        return await abortar("⚠️ El staff aún no configuró el canal de respuestas. Avísales e inténtalo de nuevo.")
+
+    rec["respuestas"] = respuestas
+    rec["estado"] = "completada"
+    staff_msg = await canal.send(embed=build_resp_embed(guild, rec), view=ReviewView())
+    p["rev"][str(staff_msg.id)] = dict(rec)
+    save()
+
+    try:
+        e = pub_msg.embeds[0].copy()
+        e.add_field(name="Estado", value="📨 Formulario enviado al staff", inline=False)
+        await pub_msg.edit(embed=e, view=None)
+    except discord.HTTPException:
+        pass
+
+    await limpiar()
+    try:
+        await user.send(f"✅ ¡Listo! Tu postulación **#{rec['numero']}** fue enviada al staff. Recibirás la respuesta por aquí.")
+    except discord.HTTPException:
+        pass
+
+
+class PostulaView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Iniciar formulario", emoji="📝", style=discord.ButtonStyle.success, custom_id="post:start")
+    async def iniciar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        p = cfg(interaction.guild.id)["post"]
+        rec = p["pend"].get(str(interaction.message.id))
+        if not rec:
+            return await interaction.response.send_message("❌ Esta postulación ya no existe.", ephemeral=True)
+        if interaction.user.id != rec["candidato"]:
+            return await interaction.response.send_message(
+                f"🔒 Solo <@{rec['candidato']}> puede iniciar este formulario.", ephemeral=True
+            )
+        if rec["estado"] == "completada":
+            return await interaction.response.send_message("✅ Ya completaste este formulario.", ephemeral=True)
+        if interaction.message.id in ACTIVAS:
+            return await interaction.response.send_message("📬 Ya tienes el formulario abierto en tus MD.", ephemeral=True)
+        try:
+            intro = await interaction.user.send(
+                embed=discord.Embed(
+                    title=f"📝 Formulario: {rec['formulario']}",
+                    description=f"Vas a responder **{len(rec['preguntas'])}** pregunta(s) para **{interaction.guild.name}**.\n"
+                    "Te las haré una por una. Escribe `cancelar` en cualquier momento para salir.",
+                    color=0x5865F2,
+                )
+            )
+        except discord.Forbidden:
+            return await interaction.response.send_message(
+                "❌ No puedo escribirte por MD. Activa los mensajes directos del servidor y vuelve a intentarlo.",
+                ephemeral=True,
+            )
+        ACTIVAS.add(interaction.message.id)
+        await interaction.response.send_message("📬 ¡Te escribí por MD! Continúa ahí.", ephemeral=True)
+        asyncio.create_task(run_form(interaction.guild, interaction.message, rec, interaction.user, intro))
+
+
+class NotaPostModal(discord.ui.Modal):
+    def __init__(self, aprobado: bool, mensaje: discord.Message):
+        super().__init__(title="Aprobar postulación" if aprobado else "Rechazar postulación")
+        self.aprobado = aprobado
+        self.mensaje = mensaje
+        self.nota = discord.ui.TextInput(
+            label="Nota para el postulante (opcional)", style=discord.TextStyle.paragraph, required=False, max_length=800
+        )
+        self.add_item(self.nota)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        p = cfg(interaction.guild.id)["post"]
+        rec = p["rev"].get(str(self.mensaje.id))
+        if not rec:
+            return await interaction.response.send_message("❌ No encuentro los datos de esta postulación.", ephemeral=True)
+        nota = self.nota.value or "Sin nota."
+        estado = "✅ Aprobada" if self.aprobado else "❌ Rechazada"
+        vars = post_vars(interaction.guild, rec, estado=estado, staff=interaction.user.mention, nota=nota)
+
+        embed = build_resp_embed(interaction.guild, rec, vars)
+        embed.color = 0x2ECC71 if self.aprobado else 0xE74C3C
+        embed.add_field(name="Revisada por", value=interaction.user.mention, inline=True)
+        embed.add_field(name="Nota", value=nota, inline=False)
+        await interaction.response.edit_message(embed=embed, view=None)
+
+        rec["estado"] = "aprobada" if self.aprobado else "rechazada"
+        save()
+        try:
+            user = await client.fetch_user(rec["candidato"])
+            dm = post_embed(p["embeds"]["aprobada" if self.aprobado else "rechazada"], vars)
+            await user.send(embed=dm)
+        except (discord.Forbidden, discord.HTTPException):
+            await interaction.followup.send("⚠️ No pude enviarle el MD al postulante (los tiene cerrados).", ephemeral=True)
+
+
+class ReviewView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if not puede_revisar(interaction.user):
+            await interaction.response.send_message("❌ No tienes permiso para revisar postulaciones.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="Aprobar", style=discord.ButtonStyle.success, custom_id="post:ok")
+    async def aprobar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(NotaPostModal(True, interaction.message))
+
+    @discord.ui.button(label="Rechazar", style=discord.ButtonStyle.danger, custom_id="post:no")
+    async def rechazar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(NotaPostModal(False, interaction.message))
+
+
+@tree.command(name="postulacion", description="Envía un formulario de postulación a un candidato")
+@app_commands.describe(formulario="Formulario que debe responder", candidato="Quién se está postulando")
+@app_commands.guild_only()
+async def postulacion(interaction: discord.Interaction, formulario: str, candidato: discord.Member):
+    p = cfg(interaction.guild.id)["post"]
+    if not puede_enviar(interaction.user):
+        return await interaction.response.send_message("❌ No tienes permiso para enviar postulaciones.", ephemeral=True)
+    if candidato.bot:
+        return await interaction.response.send_message("❌ Un bot no puede postularse.", ephemeral=True)
+    preguntas = p["forms"].get(formulario)
+    if not preguntas:
+        return await interaction.response.send_message("⚠️ Ese formulario no existe.", ephemeral=True)
+    if not p["canal"] or interaction.guild.get_channel(p["canal"]) is None:
+        return await interaction.response.send_message(
+            "⚠️ Falta configurar el canal de respuestas en `/configuracion → Postulaciones`.", ephemeral=True
+        )
+    p["contador"] += 1
+    rec = {
+        "numero": p["contador"],
+        "formulario": formulario,
+        "preguntas": list(preguntas),
+        "candidato": candidato.id,
+        "ejecutor": interaction.user.id,
+        "estado": "esperando",
+    }
+    await interaction.response.send_message(
+        content=candidato.mention,
+        embed=post_embed(p["embeds"]["publica"], post_vars(interaction.guild, rec)),
+        view=PostulaView(),
+        allowed_mentions=discord.AllowedMentions(users=[candidato]),
+    )
+    msg = await interaction.original_response()
+    p["pend"][str(msg.id)] = rec
+    save()
+
+
+@postulacion.autocomplete("formulario")
+async def ac_formulario(interaction: discord.Interaction, current: str):
+    forms = cfg(interaction.guild.id)["post"]["forms"]
+    return [app_commands.Choice(name=n, value=n) for n in forms if current.lower() in n.lower()][:25]
+
+
+@tree.command(name="variables", description="Variables que puedes usar en los embeds de postulación")
+async def variables_cmd(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🧩 Variables de postulación",
+        description="Escríbelas tal cual en el título, autor, descripción o pie de los embeds "
+        "(`/configuracion → Postulaciones → Embeds`) y se reemplazarán solas.\n\n"
+        + "\n".join(f"`{k}` — {v}" for k, v in VARIABLES.items()),
+        color=0x5865F2,
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 # ───────────────────────────── /configuracion ────────────────────────────────
@@ -548,6 +882,8 @@ class Menu(discord.ui.Select):
         k = self.values[0]
         if k == "sugerencias":
             return await interaction.response.edit_message(embed=sug_embed(interaction.guild.id), view=SugView())
+        if k == "postulaciones":
+            return await interaction.response.edit_message(embed=post_home_embed(interaction.guild.id), view=PostHomeView())
         if k == "eventos":
             return await interaction.response.edit_message(
                 embeds=ev_panel(interaction.guild.id, interaction.user.id), view=EvConfigView()
@@ -703,6 +1039,278 @@ class EvConfigView(AdminView):
         await interaction.response.edit_message(embed=home_embed(), view=HomeView())
 
 
+POST_EMBED_NOMBRES = {
+    "publica": "Embed público (con botón)",
+    "respuestas": "Embed de respuestas (canal staff)",
+    "aprobada": "MD: postulación aprobada",
+    "rechazada": "MD: postulación rechazada",
+}
+
+
+def _roles(ids, vacio):
+    return " ".join(f"<@&{r}>" for r in ids) or vacio
+
+
+def post_home_embed(gid: int):
+    p = cfg(gid)["post"]
+    e = discord.Embed(title="📝 Configurar postulaciones", color=0x5865F2)
+    forms = "\n".join(f"• **{n}** ({len(q)} preguntas)" for n, q in p["forms"].items())
+    e.add_field(name="Formularios", value=forms or "Ninguno todavía. Entra a **Formularios** para crear uno.", inline=False)
+    e.add_field(name="Pueden enviar postulaciones", value=_roles(p["roles_enviar"], "Solo administradores"), inline=False)
+    e.add_field(name="Aprueban / rechazan", value=_roles(p["roles_revisar"], "Solo administradores"), inline=False)
+    e.add_field(name="Canal de respuestas", value=f"<#{p['canal']}>" if p["canal"] else "No configurado", inline=False)
+    return e
+
+
+def post_forms_embed(gid: int):
+    p = cfg(gid)["post"]
+    e = discord.Embed(title="📋 Formularios", color=0x5865F2)
+    if not p["forms"]:
+        e.description = "Aún no hay formularios. Pulsa **Agregar / editar formulario**."
+    for n, qs in p["forms"].items():
+        e.add_field(name=n, value="\n".join(f"{i}. {q}" for i, q in enumerate(qs, 1))[:1024], inline=False)
+    e.set_footer(text="Si agregas un formulario con un nombre que ya existe, se reemplaza.")
+    return e
+
+
+def post_embeds_menu_embed():
+    return discord.Embed(
+        title="🎨 Embeds de postulación",
+        description="Elige cuál quieres editar:\n\n" + "\n".join(f"• **{v}**" for v in POST_EMBED_NOMBRES.values())
+        + "\n\nUsa `/variables` para ver las variables disponibles.",
+        color=0x5865F2,
+    )
+
+
+def post_embed_panel(guild, user_id: int, key: str):
+    p = cfg(guild.id)["post"]
+    info = discord.Embed(
+        title=f"🎨 Editando: {POST_EMBED_NOMBRES[key]}",
+        description="Variables: " + ", ".join(f"`{k}`" for k in VARIABLES) + "\n\nAbajo ves la vista previa en vivo.",
+        color=0x5865F2,
+    )
+    rec = {
+        "candidato": user_id, "ejecutor": user_id, "numero": 1, "formulario": "Staff",
+        "respuestas": [["¿Por qué quieres unirte?", "Respuesta de ejemplo."]],
+    }
+    if key == "respuestas":
+        prev = build_resp_embed(guild, rec)
+    else:
+        prev = post_embed(p["embeds"][key], post_vars(guild, rec, staff=f"<@{user_id}>", nota="Nota de ejemplo."))
+    return [info, prev]
+
+
+class PostDelSelect(discord.ui.Select):
+    def __init__(self, nombres):
+        super().__init__(
+            placeholder="🗑️ Eliminar un formulario",
+            options=[discord.SelectOption(label=n[:100], value=n) for n in nombres],
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        cfg(interaction.guild.id)["post"]["forms"].pop(self.values[0], None)
+        save()
+        await interaction.response.edit_message(embed=post_forms_embed(interaction.guild.id), view=PostFormsView(interaction.guild.id))
+
+
+class PostFormModal(discord.ui.Modal, title="Agregar / editar formulario"):
+    def __init__(self):
+        super().__init__()
+        self.nombre = discord.ui.TextInput(label="Nombre del formulario", max_length=50, placeholder="Ej: Staff")
+        self.preguntas = discord.ui.TextInput(
+            label="Preguntas (una por línea, máx. 10)",
+            style=discord.TextStyle.paragraph,
+            max_length=1500,
+            placeholder="¿Cuántos años tienes?\n¿Por qué quieres ser staff?",
+        )
+        self.add_item(self.nombre)
+        self.add_item(self.preguntas)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        qs = [l.strip() for l in self.preguntas.value.splitlines() if l.strip()]
+        if not qs or len(qs) > 10 or any(len(q) > 100 for q in qs):
+            return await interaction.response.send_message(
+                "❌ Escribe entre 1 y 10 preguntas, de máximo 100 caracteres cada una.", ephemeral=True
+            )
+        cfg(interaction.guild.id)["post"]["forms"][self.nombre.value.strip()] = qs
+        save()
+        await interaction.response.edit_message(embed=post_forms_embed(interaction.guild.id), view=PostFormsView(interaction.guild.id))
+
+
+class PostFormsView(AdminView):
+    def __init__(self, gid: int):
+        super().__init__()
+        nombres = list(cfg(gid)["post"]["forms"])[:25]
+        if nombres:
+            self.add_item(PostDelSelect(nombres))
+
+    @discord.ui.button(label="➕ Agregar / editar formulario", style=discord.ButtonStyle.success, row=1)
+    async def agregar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(PostFormModal())
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=1)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=post_home_embed(interaction.guild.id), view=PostHomeView())
+
+
+class PostRolesView(AdminView):
+    @discord.ui.select(cls=discord.ui.RoleSelect, min_values=0, max_values=10,
+                       placeholder="Roles que pueden enviar postulaciones", row=0)
+    async def enviar(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        cfg(interaction.guild.id)["post"]["roles_enviar"] = [r.id for r in select.values]
+        save()
+        await interaction.response.edit_message(embed=post_home_embed(interaction.guild.id), view=PostRolesView())
+
+    @discord.ui.select(cls=discord.ui.RoleSelect, min_values=0, max_values=10,
+                       placeholder="Roles que aprueban / rechazan", row=1)
+    async def revisar(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        cfg(interaction.guild.id)["post"]["roles_revisar"] = [r.id for r in select.values]
+        save()
+        await interaction.response.edit_message(embed=post_home_embed(interaction.guild.id), view=PostRolesView())
+
+    @discord.ui.select(cls=discord.ui.ChannelSelect, channel_types=[discord.ChannelType.text],
+                       placeholder="Canal donde llegan las respuestas", row=2)
+    async def canal(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        cfg(interaction.guild.id)["post"]["canal"] = select.values[0].id
+        save()
+        await interaction.response.edit_message(embed=post_home_embed(interaction.guild.id), view=PostRolesView())
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=3)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=post_home_embed(interaction.guild.id), view=PostHomeView())
+
+
+class PostTextoModal(discord.ui.Modal, title="Título, autor y color"):
+    def __init__(self, key: str, gid: int):
+        super().__init__()
+        self.key = key
+        st = cfg(gid)["post"]["embeds"][key]
+        self.titulo = discord.ui.TextInput(label="Título", default=st.get("titulo") or "", required=False, max_length=256)
+        self.autor = discord.ui.TextInput(label="Autor", default=st.get("autor") or "", required=False, max_length=100)
+        self.color = discord.ui.TextInput(label="Color (hex, ej: 5865F2)", default=st["color"], min_length=6, max_length=7)
+        self.footer = discord.ui.TextInput(label="Pie de página", default=st.get("footer") or "", required=False, max_length=100)
+        for i in (self.titulo, self.autor, self.color, self.footer):
+            self.add_item(i)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        hexa = self.color.value.lstrip("#")
+        try:
+            if len(hexa) != 6:
+                raise ValueError
+            int(hexa, 16)
+        except ValueError:
+            return await interaction.response.send_message("❌ Color inválido. Usa 6 dígitos hex.", ephemeral=True)
+        st = cfg(interaction.guild.id)["post"]["embeds"][self.key]
+        st["titulo"] = self.titulo.value or None
+        st["autor"] = self.autor.value or None
+        st["color"] = hexa
+        st["footer"] = self.footer.value or None
+        save()
+        await interaction.response.edit_message(
+            embeds=post_embed_panel(interaction.guild, interaction.user.id, self.key), view=PostEmbedEditView(self.key)
+        )
+
+
+class PostDescModal(discord.ui.Modal, title="Descripción"):
+    def __init__(self, key: str, gid: int):
+        super().__init__()
+        self.key = key
+        st = cfg(gid)["post"]["embeds"][key]
+        self.desc = discord.ui.TextInput(
+            label="Descripción (puedes usar variables)", style=discord.TextStyle.paragraph,
+            default=st.get("descripcion") or "", required=False, max_length=2000,
+        )
+        self.add_item(self.desc)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        cfg(interaction.guild.id)["post"]["embeds"][self.key]["descripcion"] = self.desc.value or None
+        save()
+        await interaction.response.edit_message(
+            embeds=post_embed_panel(interaction.guild, interaction.user.id, self.key), view=PostEmbedEditView(self.key)
+        )
+
+
+class PostImgModal(discord.ui.Modal, title="Imágenes"):
+    def __init__(self, key: str, gid: int):
+        super().__init__()
+        self.key = key
+        st = cfg(gid)["post"]["embeds"][key]
+        self.mini = discord.ui.TextInput(label="URL de la imagen chica (miniatura)", default=st.get("miniatura") or "", required=False)
+        self.img = discord.ui.TextInput(label="URL de la imagen grande", default=st.get("imagen") or "", required=False)
+        self.add_item(self.mini)
+        self.add_item(self.img)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        for url in (self.mini.value, self.img.value):
+            if url and not url.startswith(("http://", "https://")):
+                return await interaction.response.send_message("❌ Las URLs deben empezar con http:// o https://", ephemeral=True)
+        st = cfg(interaction.guild.id)["post"]["embeds"][self.key]
+        st["miniatura"] = self.mini.value or None
+        st["imagen"] = self.img.value or None
+        save()
+        await interaction.response.edit_message(
+            embeds=post_embed_panel(interaction.guild, interaction.user.id, self.key), view=PostEmbedEditView(self.key)
+        )
+
+
+class PostEmbedEditView(AdminView):
+    def __init__(self, key: str):
+        super().__init__()
+        self.key = key
+
+    @discord.ui.button(label="✏️ Título, autor y color", style=discord.ButtonStyle.primary, row=0)
+    async def texto(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(PostTextoModal(self.key, interaction.guild.id))
+
+    @discord.ui.button(label="📄 Descripción", style=discord.ButtonStyle.primary, row=0)
+    async def descripcion(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(PostDescModal(self.key, interaction.guild.id))
+
+    @discord.ui.button(label="🖼️ Imágenes", style=discord.ButtonStyle.primary, row=0)
+    async def imagenes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(PostImgModal(self.key, interaction.guild.id))
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=1)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=post_embeds_menu_embed(), view=PostEmbedsMenuView())
+
+
+class PostEmbedsMenuView(AdminView):
+    @discord.ui.select(
+        placeholder="¿Qué embed quieres editar?",
+        options=[discord.SelectOption(label=v, value=k) for k, v in POST_EMBED_NOMBRES.items()],
+        row=0,
+    )
+    async def elegir(self, interaction: discord.Interaction, select: discord.ui.Select):
+        key = select.values[0]
+        await interaction.response.edit_message(
+            embeds=post_embed_panel(interaction.guild, interaction.user.id, key), view=PostEmbedEditView(key)
+        )
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=1)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=post_home_embed(interaction.guild.id), view=PostHomeView())
+
+
+class PostHomeView(AdminView):
+    @discord.ui.button(label="📋 Formularios", style=discord.ButtonStyle.primary, row=0)
+    async def formularios(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=post_forms_embed(interaction.guild.id), view=PostFormsView(interaction.guild.id))
+
+    @discord.ui.button(label="🎨 Embeds", style=discord.ButtonStyle.primary, row=0)
+    async def embeds(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=post_embeds_menu_embed(), view=PostEmbedsMenuView())
+
+    @discord.ui.button(label="⚙️ Roles y canal", style=discord.ButtonStyle.primary, row=0)
+    async def roles(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=post_home_embed(interaction.guild.id), view=PostRolesView())
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=1)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=home_embed(), view=HomeView())
+
+
 @tree.command(name="configuracion", description="Panel de configuración de Nexus")
 @app_commands.default_permissions(administrator=True)
 @app_commands.guild_only()
@@ -733,7 +1341,14 @@ async def help_cmd(interaction: discord.Interaction):
         "Roles y diseño del embed: `/configuracion → Eventos`",
         inline=False,
     )
-    embed.add_field(name="🚧 Próximamente", value="Postulaciones, seguridad, moderación y adivina la palabra.", inline=False)
+    embed.add_field(
+        name="📝 Postulaciones",
+        value="`/postulacion` envía un formulario a un candidato (solo él puede iniciarlo, por MD)\n"
+        "El staff aprueba/rechaza con nota y el candidato recibe el resultado por MD\n"
+        "`/variables` muestra las variables para los embeds · Todo se configura en `/configuracion → Postulaciones`",
+        inline=False,
+    )
+    embed.add_field(name="🚧 Próximamente", value="Seguridad, moderación y adivina la palabra.", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
