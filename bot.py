@@ -3,6 +3,7 @@ import json
 import asyncio
 import io
 import time
+import unicodedata
 from collections import deque
 import random
 from typing import Optional
@@ -27,6 +28,7 @@ def save():
 def cfg(guild_id):
     g = data.setdefault(str(guild_id), {})
     g.setdefault("sug", {"canal": None, "roles": [], "items": {}})
+    g.setdefault("juegos", {"embeds": default_juegos_embeds()})
     g.setdefault("seg", {
         "canal": None,
         "antibot": {"on": False},
@@ -87,6 +89,7 @@ async def dado(interaction: discord.Interaction, caras: app_commands.Range[int, 
         description=f"{interaction.user.mention} lanzó el dado y salió **{r}**",
         color=0xE67E22,
     )
+    embed = estilo_juego(interaction.guild_id, "dado", embed, {"{caras}": str(caras)})
     await interaction.response.send_message(embed=embed)
 
 
@@ -96,8 +99,9 @@ GANA = {"piedra": "tijera", "papel": "piedra", "tijera": "papel"}
 
 
 class PPTView(discord.ui.View):
-    def __init__(self, a: discord.User, b: discord.User):
+    def __init__(self, a: discord.User, b: discord.User, gid=None):
         super().__init__(timeout=60)
+        self.gid = gid
         self.players = [a.id, b.id]
         self.picks = {}
         self.message = None
@@ -107,11 +111,11 @@ class PPTView(discord.ui.View):
             f"<@{p}> — {'✅ ya eligió' if p in self.picks else '⏳ eligiendo...'}"
             for p in self.players
         ]
-        return discord.Embed(
+        return estilo_juego(self.gid, "ppt", discord.Embed(
             title="🪨📄✂️ Piedra, Papel o Tijera",
             description="\n".join(lineas) + "\n\nLas elecciones son secretas hasta que ambos elijan.",
             color=0x3498DB,
-        )
+        ))
 
     async def elegir(self, interaction: discord.Interaction, pick: str):
         uid = interaction.user.id
@@ -143,6 +147,7 @@ class PPTView(discord.ui.View):
         for c in self.children:
             c.disabled = True
         self.stop()
+        embed = estilo_juego(self.gid, "ppt", embed, titulo=False)
         await interaction.response.edit_message(content=None, embed=embed, view=self)
 
     async def on_timeout(self):
@@ -175,7 +180,7 @@ async def ppt(interaction: discord.Interaction, oponente: discord.User):
         return await interaction.response.send_message(
             "Elige a otra persona (ni un bot ni tú mismo).", ephemeral=True
         )
-    view = PPTView(interaction.user, oponente)
+    view = PPTView(interaction.user, oponente, interaction.guild_id)
     await interaction.response.send_message(
         content=f"{oponente.mention}, {interaction.user.mention} te retó.",
         embed=view.estado(),
@@ -1470,8 +1475,9 @@ class CasillaBtn(discord.ui.Button):
 
 
 class TresRayaView(discord.ui.View):
-    def __init__(self, a: discord.abc.User, b: discord.abc.User):
+    def __init__(self, a: discord.abc.User, b: discord.abc.User, gid=None):
         super().__init__(timeout=120)
+        self.gid = gid
         self.jugadores = [a.id, b.id]  # el primero es ❌, el segundo ⭕
         self.turno = 0
         self.tablero = [None] * 9
@@ -1483,7 +1489,7 @@ class TresRayaView(discord.ui.View):
         a, b = self.jugadores
         desc = f"❌ <@{a}>   vs   ⭕ <@{b}>\n\n"
         desc += final or f"Turno de <@{self.jugadores[self.turno]}> {'❌' if self.turno == 0 else '⭕'}"
-        return discord.Embed(title="❌⭕ Tres en raya", description=desc, color=0x9B59B6 if not final else 0x2ECC71)
+        return estilo_juego(self.gid, "tres_raya", discord.Embed(title="❌⭕ Tres en raya", description=desc, color=0x9B59B6 if not final else 0x2ECC71))
 
     async def jugar(self, interaction: discord.Interaction, boton: CasillaBtn):
         if interaction.user.id not in self.jugadores:
@@ -1525,11 +1531,380 @@ class TresRayaView(discord.ui.View):
 async def tres_en_raya(interaction: discord.Interaction, oponente: discord.Member):
     if oponente.bot or oponente.id == interaction.user.id:
         return await interaction.response.send_message("Elige a otra persona (ni un bot ni tú mismo).", ephemeral=True)
-    view = TresRayaView(interaction.user, oponente)
+    view = TresRayaView(interaction.user, oponente, interaction.guild_id)
     await interaction.response.send_message(
         content=f"{oponente.mention}, {interaction.user.mention} te retó a un tres en raya.",
         embed=view.embed(), view=view,
     )
+    view.message = await interaction.original_response()
+
+
+# ─────────────────────────── Estilo de embeds de juegos ──────────────────────
+def default_juegos_embeds():
+    base = {"autor": None, "descripcion": None, "miniatura": None, "imagen": None, "footer": None}
+    return {
+        "ppt": {**base, "titulo": "🪨📄✂️ Piedra, Papel o Tijera", "color": "3498DB"},
+        "dado": {**base, "titulo": "🎲 Dado de {caras} caras", "color": "E67E22"},
+        "tres_raya": {**base, "titulo": "❌⭕ Tres en raya", "color": "9B59B6"},
+        "adivina": {**base, "titulo": "🔤 Adivina la palabra — {tema}", "color": "9B59B6"},
+    }
+
+
+def estilo_juego(gid, key, emb, vars=None, titulo=True):
+    """Aplica a un embed de juego el diseño que el admin configuró (si lo hay)."""
+    if gid is None:
+        return emb
+    st = cfg(gid)["juegos"]["embeds"].get(key)
+    if not st:
+        return emb
+    vars = vars or {}
+    if titulo and st.get("titulo"):
+        emb.title = render(st["titulo"], vars)[:256]
+    try:
+        emb.color = int(st["color"].lstrip("#"), 16)
+    except (ValueError, KeyError):
+        pass
+    if st.get("autor"):
+        emb.set_author(name=render(st["autor"], vars)[:256])
+    if st.get("miniatura"):
+        emb.set_thumbnail(url=st["miniatura"])
+    if st.get("imagen"):
+        emb.set_image(url=st["imagen"])
+    if st.get("footer"):
+        emb.set_footer(text=render(st["footer"], vars)[:2048])
+    return emb
+
+
+# ───────────────────────────── Adivina la palabra ────────────────────────────
+TEMAS = {"anime": ("🎌", "Anime"), "historia": ("📜", "Historia"), "videojuegos": ("🎮", "Videojuegos")}
+JUEGOS_ADIVINA = set()  # canales con una partida en curso
+
+PALABRAS = {
+    "anime": [
+        ("naruto", "Ninja que sueña con ser Hokage"),
+        ("one piece", "Piratas en busca del tesoro más grande del mundo"),
+        ("dragon ball", "Siete esferas que conceden deseos"),
+        ("death note", "Una libreta que mata a quien se escribe en ella"),
+        ("ataque a los titanes", "La humanidad vive tras enormes murallas"),
+        ("fullmetal alchemist", "Dos hermanos y la alquimia"),
+        ("hunter x hunter", "Gon busca a su padre"),
+        ("demon slayer", "Tanjiro y su hermana convertida en demonio"),
+        ("my hero academia", "Un mundo de superpoderes llamados Quirks"),
+        ("jujutsu kaisen", "Maldiciones y hechiceros"),
+        ("one punch man", "Héroe que derrota a todos de un solo golpe"),
+        ("sailor moon", "Guerreras que luchan en nombre de la luna"),
+        ("pokemon", "Atrápalos a todos"),
+        ("evangelion", "Robots gigantes y un joven piloto"),
+        ("cowboy bebop", "Cazarrecompensas en el espacio"),
+        ("spy x family", "Espía, asesina y telépata fingiendo ser familia"),
+        ("chainsaw man", "Un demonio con motosierra en la cabeza"),
+        ("haikyuu", "Anime de voleibol"),
+        ("bleach", "Shinigamis y almas perdidas"),
+        ("tokyo ghoul", "Un humano convertido en mitad ghoul"),
+        ("fairy tail", "Un gremio de magos"),
+        ("black clover", "Asta, sin magia, sueña con ser rey mago"),
+        ("doraemon", "Gato robot del futuro con un bolsillo mágico"),
+        ("goku", "Saiyajin criado en la Tierra"),
+        ("luffy", "Capitán de los Sombrero de Paja"),
+    ],
+    "historia": [
+        ("napoleon", "Emperador francés derrotado en Waterloo"),
+        ("cleopatra", "Última reina del antiguo Egipto"),
+        ("julio cesar", "Dictador romano asesinado en los idus de marzo"),
+        ("alejandro magno", "Rey macedonio que conquistó Persia"),
+        ("cristobal colon", "Llegó a América en 1492"),
+        ("simon bolivar", "El Libertador de varios países sudamericanos"),
+        ("revolucion francesa", "Cayó la Bastilla en 1789"),
+        ("imperio romano", "Gobernó el Mediterráneo desde la ciudad de las siete colinas"),
+        ("imperio inca", "Civilización andina con capital en el Cusco"),
+        ("aztecas", "Pueblo que fundó Tenochtitlan"),
+        ("mayas", "Civilización de pirámides y un calendario famoso"),
+        ("muralla china", "Gran construcción para frenar invasores del norte"),
+        ("guerra fria", "Tensión entre EE.UU. y la URSS sin combate directo"),
+        ("primera guerra mundial", "Estalló tras el asesinato de Francisco Fernando"),
+        ("segunda guerra mundial", "Conflicto global de 1939 a 1945"),
+        ("renacimiento", "Época de Leonardo da Vinci y Miguel Ángel"),
+        ("edad media", "Época de castillos y feudalismo"),
+        ("piramides de egipto", "Tumbas monumentales de los faraones"),
+        ("carlomagno", "Emperador coronado el año 800"),
+        ("isabel la catolica", "Reina de Castilla que apoyó a Colón"),
+        ("mahatma gandhi", "Líder de la independencia de la India"),
+        ("nelson mandela", "Presidente que puso fin al apartheid"),
+        ("abraham lincoln", "Presidente de EE.UU. durante la Guerra Civil"),
+        ("revolucion industrial", "Nacen las fábricas y la máquina de vapor"),
+        ("caida del muro de berlin", "En 1989 terminó la división de Alemania"),
+    ],
+    "videojuegos": [
+        ("minecraft", "Mundo de bloques para construir y sobrevivir"),
+        ("fortnite", "Battle royale con construcciones"),
+        ("super mario", "Fontanero que rescata a una princesa"),
+        ("the legend of zelda", "Un héroe con espada que salva Hyrule"),
+        ("pac man", "Círculo amarillo que come puntos y evita fantasmas"),
+        ("tetris", "Piezas que caen y forman líneas"),
+        ("sonic", "Erizo azul muy veloz"),
+        ("among us", "Impostores en una nave espacial"),
+        ("league of legends", "MOBA con campeones y la Grieta del Invocador"),
+        ("counter strike", "Terroristas contra antiterroristas"),
+        ("grand theft auto", "Crimen en mundo abierto; sus siglas son GTA"),
+        ("call of duty", "Shooter bélico muy famoso"),
+        ("the sims", "Simulador de vida con personajes que controlas"),
+        ("animal crossing", "Vida tranquila en una isla con Tom Nook"),
+        ("dark souls", "Saga muy difícil con fogatas"),
+        ("resident evil", "Zombis y la corporación Umbrella"),
+        ("god of war", "Un espartano que desafía a los dioses"),
+        ("halo", "Un supersoldado con armadura verde llamado Jefe Maestro"),
+        ("overwatch", "Shooter de héroes con habilidades únicas"),
+        ("valorant", "Shooter táctico con agentes"),
+        ("rocket league", "Fútbol jugado con autos"),
+        ("stardew valley", "Granja, cultivos y un pueblo encantador"),
+        ("hollow knight", "Insecto caballero en un reino subterráneo"),
+        ("elden ring", "Las Tierras Intermedias, de FromSoftware"),
+        ("metal gear solid", "Snake y el sigilo"),
+    ],
+}
+
+
+def norm(t: str) -> str:
+    t = unicodedata.normalize("NFD", t.lower())
+    return " ".join("".join(c for c in t if unicodedata.category(c) != "Mn").split())
+
+
+async def jugar_adivina(canal, jugadores, tema):
+    gid = canal.guild.id
+    emoji, nombre = TEMAS[tema]
+    vars_ = {"{tema}": nombre}
+    try:
+        palabra, pista = random.choice(PALABRAS[tema])
+        vidas = {u.id: 5 for u in jugadores}
+        orden = jugadores[:]
+        random.shuffle(orden)
+        letras = set(palabra.replace(" ", ""))
+        acertadas, falladas = set(), []
+
+        def mascara():
+            grupos = [" ".join(c.upper() if c in acertadas else "_" for c in parte) for parte in palabra.split(" ")]
+            return "   /   ".join(grupos)
+
+        def tablero(turno):
+            e = discord.Embed(color=0x9B59B6)
+            e.add_field(name="💡 Pista", value=pista, inline=False)
+            e.add_field(name="Palabra", value=f"```{mascara()}```", inline=False)
+            e.add_field(name="Letras falladas", value=" ".join(falladas).upper() or "—", inline=False)
+            e.add_field(
+                name="Vidas",
+                value="\n".join(
+                    f"{'👉 ' if u.id == turno.id else ''}{u.mention}: {'❤️' * vidas[u.id] or '💀'}" for u in orden
+                ),
+                inline=False,
+            )
+            e.set_footer(text="En tu turno escribe UNA letra o la palabra completa (30 s)")
+            e.title = f"🔤 Adivina la palabra — {emoji} {nombre}"
+            return estilo_juego(gid, "adivina", e, vars_)
+
+        ganador, motivo, idx, previo = None, "", 0, None
+        while ganador is None:
+            vivos = [u for u in orden if vidas[u.id] > 0]
+            if len(vivos) == 1:
+                ganador, motivo = vivos[0], "es el último jugador en pie"
+                break
+            u = orden[idx % len(orden)]
+            idx += 1
+            if vidas[u.id] <= 0:
+                continue
+            if previo:
+                try:
+                    await previo.delete()
+                except discord.HTTPException:
+                    pass
+            previo = await canal.send(content=u.mention, embed=tablero(u))
+
+            limite = time.monotonic() + 30
+            while True:
+                try:
+                    r = await client.wait_for(
+                        "message",
+                        check=lambda x: x.author.id == u.id and x.channel.id == canal.id,
+                        timeout=max(limite - time.monotonic(), 0.1),
+                    )
+                except asyncio.TimeoutError:
+                    vidas[u.id] -= 1
+                    await canal.send(f"⌛ {u.mention} se quedó sin tiempo y pierde una vida.", delete_after=6)
+                    break
+                t = norm(r.content)
+                if len(t) == 1 and t.isalpha():
+                    if t in acertadas or t in falladas:
+                        await canal.send("Esa letra ya se dijo. Prueba con otra.", delete_after=4)
+                        continue
+                    if t in letras:
+                        acertadas.add(t)
+                        if letras <= acertadas:
+                            ganador, motivo = u, "completó la palabra"
+                    else:
+                        falladas.append(t)
+                        vidas[u.id] -= 1
+                    break
+                if len(t) >= 2:
+                    if t == palabra:
+                        ganador, motivo = u, "adivinó la palabra"
+                    else:
+                        vidas[u.id] -= 1
+                        await canal.send(f"❌ «{t}» no es la palabra.", delete_after=5)
+                    break
+                # un solo carácter que no es letra: se ignora y se sigue esperando
+
+            if ganador is None and vidas[u.id] <= 0:
+                await canal.send(f"💀 {u.mention} se quedó sin vidas y fue eliminado.", delete_after=8)
+
+        if previo:
+            try:
+                await previo.delete()
+            except discord.HTTPException:
+                pass
+        final = discord.Embed(
+            title=f"🏆 ¡Gana {ganador.display_name}!",
+            description=f"{ganador.mention} {motivo}.\n\nLa palabra era **{palabra.upper()}**.",
+            color=0x2ECC71,
+        )
+        await canal.send(content=ganador.mention, embed=final)
+    except discord.HTTPException:
+        pass
+    finally:
+        JUEGOS_ADIVINA.discard(canal.id)
+
+
+class AdivinaLobbyView(discord.ui.View):
+    def __init__(self, host, n, tema, canal):
+        super().__init__(timeout=120)
+        self.host, self.n, self.tema, self.canal = host, n, tema, canal
+        self.jugadores = [host]
+        self.message = None
+
+    def embed(self, texto=None):
+        emoji, nombre = TEMAS[self.tema]
+        e = discord.Embed(title="🔤 Adivina la palabra — Sala", color=0x9B59B6)
+        e.add_field(name="Temática", value=f"{emoji} {nombre}", inline=True)
+        e.add_field(name="Jugadores", value=f"{len(self.jugadores)}/{self.n}", inline=True)
+        e.add_field(name="En la sala", value="\n".join(u.mention for u in self.jugadores), inline=False)
+        e.set_footer(text=texto or "Pulsa «Unirse». La partida empieza cuando se complete la sala (2 min).")
+        return e
+
+    @discord.ui.button(label="Unirse", emoji="🎮", style=discord.ButtonStyle.success)
+    async def unirse(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if any(u.id == interaction.user.id for u in self.jugadores):
+            return await interaction.response.send_message("Ya estás en la sala.", ephemeral=True)
+        self.jugadores.append(interaction.user)
+        if len(self.jugadores) >= self.n:
+            for c in self.children:
+                c.disabled = True
+            self.stop()
+            await interaction.response.edit_message(embed=self.embed("¡Sala completa! Empezando..."), view=self)
+            asyncio.create_task(jugar_adivina(self.canal, self.jugadores, self.tema))
+        else:
+            await interaction.response.edit_message(embed=self.embed(), view=self)
+
+    @discord.ui.button(label="Salir", style=discord.ButtonStyle.secondary)
+    async def salir(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id == self.host.id:
+            return await interaction.response.send_message("Eres el anfitrión; usa «Cancelar» si quieres cerrar la sala.", ephemeral=True)
+        self.jugadores = [u for u in self.jugadores if u.id != interaction.user.id]
+        await interaction.response.edit_message(embed=self.embed(), view=self)
+
+    @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.danger)
+    async def cancelar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.host.id:
+            return await interaction.response.send_message("Solo el anfitrión puede cancelar.", ephemeral=True)
+        JUEGOS_ADIVINA.discard(self.canal.id)
+        for c in self.children:
+            c.disabled = True
+        self.stop()
+        await interaction.response.edit_message(embed=self.embed("🚫 Sala cancelada por el anfitrión."), view=self)
+
+    async def on_timeout(self):
+        JUEGOS_ADIVINA.discard(self.canal.id)
+        for c in self.children:
+            c.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(embed=self.embed("⌛ Sala cerrada: no se completaron los jugadores."), view=self)
+            except discord.HTTPException:
+                pass
+
+
+class AdivinaSetupView(discord.ui.View):
+    def __init__(self, host):
+        super().__init__(timeout=120)
+        self.host = host
+        self.n = None
+        self.tema = None
+        self.message = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.host.id:
+            await interaction.response.send_message("Solo quien ejecutó el comando puede configurar la partida.", ephemeral=True)
+            return False
+        return True
+
+    def embed(self):
+        e = discord.Embed(
+            title="🔤 Adivina la palabra",
+            description="Elige cuántos van a jugar y la temática, y pulsa **Crear partida**.",
+            color=0x9B59B6,
+        )
+        e.add_field(name="Jugadores", value=f"{self.n}" if self.n else "—", inline=True)
+        e.add_field(name="Temática", value=" ".join(TEMAS[self.tema]) if self.tema else "—", inline=True)
+        e.add_field(
+            name="Reglas",
+            value="Cada jugador tiene 5 vidas ❤️. En tu turno (30 s) escribe **una letra** o **la palabra completa**.\n"
+            "Fallar o quedarte sin tiempo cuesta 1 vida. Gana quien adivine la palabra o quede último en pie.",
+            inline=False,
+        )
+        return e
+
+    @discord.ui.select(
+        placeholder="¿Cuántos jugadores? (2, 3 o 4)",
+        options=[discord.SelectOption(label=f"{n} jugadores", value=str(n), emoji="👥") for n in (2, 3, 4)],
+        row=0,
+    )
+    async def jugadores(self, interaction: discord.Interaction, select: discord.ui.Select):
+        self.n = int(select.values[0])
+        await interaction.response.edit_message(embed=self.embed(), view=self)
+
+    @discord.ui.select(
+        placeholder="¿De qué temática?",
+        options=[discord.SelectOption(label=n, value=k, emoji=e) for k, (e, n) in TEMAS.items()],
+        row=1,
+    )
+    async def tematica(self, interaction: discord.Interaction, select: discord.ui.Select):
+        self.tema = select.values[0]
+        await interaction.response.edit_message(embed=self.embed(), view=self)
+
+    @discord.ui.button(label="Crear partida", style=discord.ButtonStyle.success, row=2)
+    async def crear(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.n or not self.tema:
+            return await interaction.response.send_message("Elige primero los jugadores y la temática.", ephemeral=True)
+        if interaction.channel_id in JUEGOS_ADIVINA:
+            return await interaction.response.send_message("Ya hay una partida en este canal.", ephemeral=True)
+        JUEGOS_ADIVINA.add(interaction.channel_id)
+        self.stop()
+        lobby = AdivinaLobbyView(self.host, self.n, self.tema, interaction.channel)
+        await interaction.response.edit_message(embed=lobby.embed(), view=lobby)
+        lobby.message = await interaction.original_response()
+
+    async def on_timeout(self):
+        for c in self.children:
+            c.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass
+
+
+@tree.command(name="adivina-la-palabra", description="Adivina la palabra con 2 a 4 jugadores")
+@app_commands.guild_only()
+async def adivina_cmd(interaction: discord.Interaction):
+    view = AdivinaSetupView(interaction.user)
+    await interaction.response.send_message(embed=view.embed(), view=view)
     view.message = await interaction.original_response()
 
 
@@ -1541,6 +1916,7 @@ SECCIONES = {
     "seguridad": ("🛡️", "Seguridad", "Anti-Bot, Anti-Raid, Anti-Spam, Whitelist"),
     "moderacion": ("🔨", "Moderación", "Sanciones, casos y registros"),
     "juegos": ("🎮", "Juegos", "Editar embeds de los juegos"),
+    "tickets": ("🎫", "Tickets", "Canales privados de soporte"),
 }
 
 
@@ -1594,6 +1970,8 @@ class Menu(discord.ui.Select):
         k = self.values[0]
         if k == "sugerencias":
             return await interaction.response.edit_message(embed=sug_embed(interaction.guild.id), view=SugView())
+        if k == "juegos":
+            return await interaction.response.edit_message(embed=juegos_menu_embed(), view=JuegosMenuView())
         if k == "seguridad":
             return await interaction.response.edit_message(embed=seg_home_embed(interaction.guild.id), view=SegHomeView())
         if k == "moderacion":
@@ -2129,9 +2507,11 @@ class StyleImgModal(discord.ui.Modal, title="Imágenes"):
 
 
 class StyleEditView(AdminView):
-    def __init__(self, seccion, key, preview, volver):
+    def __init__(self, seccion, key, preview, volver, con_desc=True):
         super().__init__()
         self.seccion, self.key, self.preview, self.volver_fn = seccion, key, preview, volver
+        if not con_desc:
+            self.remove_item(self.descripcion)
 
     def refrescar(self, interaction):
         return {"embeds": self.preview(interaction.guild, interaction.user.id, self.key), "view": self}
@@ -2460,6 +2840,54 @@ class SegHomeView(AdminView):
         await interaction.response.edit_message(embed=home_embed(), view=HomeView())
 
 
+JUEGOS_EMBED_NOMBRES = {
+    "ppt": "Piedra, papel o tijera",
+    "dado": "Dado",
+    "tres_raya": "Tres en raya",
+    "adivina": "Adivina la palabra",
+}
+
+
+def juegos_menu_embed():
+    return discord.Embed(
+        title="🎮 Embeds de los juegos",
+        description="Elige el juego cuyo embed quieres editar:\n\n" + "\n".join(f"• **{v}**" for v in JUEGOS_EMBED_NOMBRES.values())
+        + "\n\nPuedes cambiar título, autor, color, pie de página y las imágenes. "
+        "En el título del dado puedes usar `{caras}` y en el de adivina la palabra `{tema}`.",
+        color=0x5865F2,
+    )
+
+
+def juego_embed_panel(guild, user_id: int, key: str):
+    info = discord.Embed(
+        title=f"🎨 Editando: {JUEGOS_EMBED_NOMBRES[key]}",
+        description="Abajo ves la vista previa en vivo. El contenido de cada partida cambia solo.",
+        color=0x5865F2,
+    )
+    base = discord.Embed(title="(título)", description="Aquí va el contenido de la partida.", color=0x5865F2)
+    return [info, estilo_juego(guild.id, key, base, {"{caras}": "6", "{tema}": "Anime"})]
+
+
+async def volver_juegos_menu(interaction: discord.Interaction):
+    await interaction.response.edit_message(embed=juegos_menu_embed(), view=JuegosMenuView())
+
+
+class JuegosMenuView(AdminView):
+    @discord.ui.select(
+        placeholder="¿Qué juego quieres editar?",
+        options=[discord.SelectOption(label=v, value=k, emoji="🎮") for k, v in JUEGOS_EMBED_NOMBRES.items()],
+        row=0,
+    )
+    async def elegir(self, interaction: discord.Interaction, select: discord.ui.Select):
+        key = select.values[0]
+        view = StyleEditView("juegos", key, juego_embed_panel, volver_juegos_menu, con_desc=False)
+        await interaction.response.edit_message(embeds=juego_embed_panel(interaction.guild, interaction.user.id, key), view=view)
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=1)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=home_embed(), view=HomeView())
+
+
 @tree.command(name="configuracion", description="Panel de configuración de Nexus")
 @app_commands.default_permissions(administrator=True)
 @app_commands.guild_only()
@@ -2480,7 +2908,7 @@ async def help_cmd(interaction: discord.Interaction):
     )
     embed.add_field(
         name="🎮 Juegos",
-        value="`/ppt @usuario` — piedra, papel o tijera (ambos eligen en secreto)\n`/dado [caras]` — dado de 2 a 16 caras\n`/tres-en-raya @usuario` — tres en raya para 2 jugadores",
+        value="`/ppt @usuario` — piedra, papel o tijera (ambos eligen en secreto)\n`/dado [caras]` — dado de 2 a 16 caras\n`/tres-en-raya @usuario` — tres en raya para 2 jugadores\n`/adivina-la-palabra` — 2 a 4 jugadores con temática (Anime, Historia o Videojuegos)",
         inline=False,
     )
     embed.add_field(
@@ -2515,7 +2943,7 @@ async def help_cmd(interaction: discord.Interaction):
         "**Anti-Raid**, **Anti-Spam** y **White-List**. Cada uno tiene su propio panel.",
         inline=False,
     )
-    embed.add_field(name="🚧 Próximamente", value="`/adivina-la-palabra` (2-4 jugadores).", inline=False)
+    embed.add_field(name="🚧 Próximamente", value="Sistema de **tickets** (ya aparece en `/configuracion`).", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
