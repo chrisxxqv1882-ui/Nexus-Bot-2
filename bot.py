@@ -1349,7 +1349,6 @@ async def caso_cmd(interaction: discord.Interaction, numero: app_commands.Range[
     await interaction.followup.send(embed=emb, ephemeral=True)
 
 
-
 # ──────────────────────────────── Seguridad ──────────────────────────────────
 JOINS = {}        # guild_id -> deque[(timestamp, member)]
 RAID_HASTA = {}   # guild_id -> timestamp hasta el que dura el "modo raid"
