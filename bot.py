@@ -2,6 +2,8 @@ import os
 import json
 import asyncio
 import io
+import time
+from collections import deque
 import random
 from typing import Optional
 from datetime import timedelta
@@ -25,6 +27,13 @@ def save():
 def cfg(guild_id):
     g = data.setdefault(str(guild_id), {})
     g.setdefault("sug", {"canal": None, "roles": [], "items": {}})
+    g.setdefault("seg", {
+        "canal": None,
+        "antibot": {"on": False},
+        "antiraid": {"on": False, "joins": 5, "segundos": 10, "accion": "kick"},
+        "antispam": {"on": False, "mensajes": 5, "segundos": 5, "timeout": 10, "menciones": 6},
+        "wl": {"usuarios": [], "roles": []},
+    })
     g.setdefault("mod", {
         "canal": None, "roles": [], "contador": 0, "casos": {}, "embeds": default_mod_embeds(),
     })
@@ -1273,6 +1282,257 @@ async def caso_cmd(interaction: discord.Interaction, numero: app_commands.Range[
     await interaction.followup.send(embed=emb, ephemeral=True)
 
 
+# ──────────────────────────────── Seguridad ──────────────────────────────────
+JOINS = {}        # guild_id -> deque[(timestamp, member)]
+RAID_HASTA = {}   # guild_id -> timestamp hasta el que dura el "modo raid"
+SPAM = {}         # (guild_id, user_id) -> deque[(timestamp, message)]
+
+
+def en_whitelist(member, s) -> bool:
+    wl = s["wl"]
+    return (
+        member.id == member.guild.owner_id
+        or member.id in wl["usuarios"]
+        or any(r.id in wl["roles"] for r in getattr(member, "roles", []))
+    )
+
+
+async def log_seg(guild, s, titulo, descripcion, color=0xE74C3C):
+    canal = guild.get_channel(s["canal"]) if s["canal"] else None
+    if canal is None:
+        return
+    emb = discord.Embed(title=titulo, description=descripcion, color=color, timestamp=discord.utils.utcnow())
+    try:
+        await canal.send(embed=emb)
+    except discord.HTTPException:
+        pass
+
+
+async def manejar_bot(bot: discord.Member, s):
+    """Anti-Bot: banea al bot (esté online u offline) y a quien lo agregó."""
+    g = bot.guild
+    if bot.id in s["wl"]["usuarios"]:
+        await log_seg(g, s, "🤖 Bot permitido", f"{bot.mention} está en la White-List.", 0x2ECC71)
+        return
+
+    adder = None
+    if g.me.guild_permissions.view_audit_log:
+        for _ in range(3):  # el registro de auditoría tarda un poco en actualizarse
+            await asyncio.sleep(1.5)
+            try:
+                async for entry in g.audit_logs(limit=10, action=discord.AuditLogAction.bot_add):
+                    reciente = (discord.utils.utcnow() - entry.created_at).total_seconds() < 120
+                    if entry.target and entry.target.id == bot.id and reciente:
+                        adder = entry.user
+                        break
+            except discord.HTTPException:
+                break
+            if adder:
+                break
+
+    adder_m = g.get_member(adder.id) if adder else None
+    if adder and (adder.id == g.owner_id or (adder_m and en_whitelist(adder_m, s))):
+        await log_seg(g, s, "🤖 Bot permitido", f"{bot.mention} fue agregado por {adder.mention} (dueño/White-List).", 0x2ECC71)
+        return
+
+    res = []
+    try:
+        await g.ban(bot, reason="[Nexus Anti-Bot] Bot no autorizado", delete_message_seconds=0)
+        res.append(f"🔨 Bot **{bot}** baneado")
+    except discord.HTTPException as e:
+        res.append(f"❌ No pude banear al bot: {e.text or e}")
+
+    if adder is None:
+        res.append("⚠️ No pude identificar quién lo agregó (revisa que tenga el permiso *Ver registro de auditoría*).")
+    elif adder.bot:
+        res.append(f"ℹ️ Lo agregó otro bot ({adder.mention}); no se banea.")
+    else:
+        try:
+            await g.ban(adder, reason=f"[Nexus Anti-Bot] Agregó un bot no autorizado ({bot})", delete_message_seconds=0)
+            res.append(f"🔨 {adder.mention} baneado por agregar el bot")
+        except discord.HTTPException as e:
+            res.append(f"❌ No pude banear a {adder.mention}: {e.text or e}")
+    await log_seg(g, s, "🚫 Anti-Bot: bot no autorizado", "\n".join(res))
+
+
+async def aplicar_raid(member: discord.Member, accion: str):
+    try:
+        if accion == "ban":
+            await member.guild.ban(member, reason="[Nexus Anti-Raid]", delete_message_seconds=0)
+        else:
+            await member.kick(reason="[Nexus Anti-Raid]")
+        return True
+    except discord.HTTPException:
+        return False
+
+
+async def manejar_raid(member: discord.Member, s):
+    g = member.guild
+    r = s["antiraid"]
+    ahora = time.time()
+    dq = JOINS.setdefault(g.id, deque())
+    dq.append((ahora, member))
+    while dq and ahora - dq[0][0] > r["segundos"]:
+        dq.popleft()
+
+    if ahora < RAID_HASTA.get(g.id, 0):  # ya estamos en modo raid
+        await aplicar_raid(member, r["accion"])
+        return
+    if len(dq) < r["joins"]:
+        return
+
+    RAID_HASTA[g.id] = ahora + 120
+    objetivos = [m for _, m in dq]
+    dq.clear()
+    ok = 0
+    for m in objetivos:
+        if await aplicar_raid(m, r["accion"]):
+            ok += 1
+    verbo = "baneadas" if r["accion"] == "ban" else "expulsadas"
+    await log_seg(
+        g, s, "🚨 Anti-Raid: raid detectado",
+        f"Entraron **{len(objetivos)}** cuentas en menos de {r['segundos']} s.\n"
+        f"**{ok}** cuentas {verbo}. Modo raid activo durante 2 minutos: cada nueva entrada recibirá la misma acción.",
+    )
+
+
+async def antispam(m: discord.Message) -> bool:
+    """Devuelve True si el mensaje fue tratado como spam (y ya no hay que procesarlo más)."""
+    g = m.guild
+    s = cfg(g.id)["seg"]
+    a = s["antispam"]
+    if not a["on"] or not isinstance(m.author, discord.Member):
+        return False
+    u = m.author
+    if u.guild_permissions.administrator or en_whitelist(u, s) or puede_moderar(u):
+        return False
+
+    ahora = time.time()
+    if len(SPAM) > 5000:
+        SPAM.clear()
+    dq = SPAM.setdefault((g.id, u.id), deque())
+    dq.append((ahora, m))
+    while dq and ahora - dq[0][0] > a["segundos"]:
+        dq.popleft()
+
+    menciones = len(m.mentions) + len(m.role_mentions)
+    flood = len(dq) >= a["mensajes"]
+    if not flood and menciones < a["menciones"]:
+        return False
+
+    msgs = [x for _, x in dq] if flood else [m]
+    dq.clear()
+    for x in msgs:
+        try:
+            await x.delete()
+        except discord.HTTPException:
+            pass
+
+    estado = "sin aislamiento (no tengo permisos o su rol es superior al mío)"
+    if g.me.guild_permissions.moderate_members and u.id != g.owner_id and u.top_role < g.me.top_role:
+        try:
+            await u.timeout(timedelta(minutes=a["timeout"]), reason="[Nexus Anti-Spam]")
+            estado = f"aislado {a['timeout']} min"
+        except discord.HTTPException:
+            pass
+    motivo = "flood de mensajes" if flood else "menciones masivas"
+    try:
+        await m.channel.send(f"🚫 {u.mention}, detecté **{motivo}**. Tus mensajes fueron eliminados.", delete_after=8)
+    except discord.HTTPException:
+        pass
+    await log_seg(g, s, "💬 Anti-Spam", f"**Usuario:** {u.mention}\n**Motivo:** {motivo}\n"
+                  f"**Mensajes borrados:** {len(msgs)}\n**Canal:** {m.channel.mention}\n**Acción:** {estado}", 0xE67E22)
+    return True
+
+
+@client.event
+async def on_member_join(member: discord.Member):
+    s = cfg(member.guild.id)["seg"]
+    if member.bot:
+        if s["antibot"]["on"]:
+            await manejar_bot(member, s)
+        return
+    if s["antiraid"]["on"] and not en_whitelist(member, s):
+        await manejar_raid(member, s)
+
+
+# ───────────────────────────── Tres en raya ──────────────────────────────────
+LINEAS_3R = [(0, 1, 2), (3, 4, 5), (6, 7, 8), (0, 3, 6), (1, 4, 7), (2, 5, 8), (0, 4, 8), (2, 4, 6)]
+
+
+class CasillaBtn(discord.ui.Button):
+    def __init__(self, i: int):
+        super().__init__(label="\u200b", style=discord.ButtonStyle.secondary, row=i // 3)
+        self.i = i
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.view.jugar(interaction, self)
+
+
+class TresRayaView(discord.ui.View):
+    def __init__(self, a: discord.abc.User, b: discord.abc.User):
+        super().__init__(timeout=120)
+        self.jugadores = [a.id, b.id]  # el primero es ❌, el segundo ⭕
+        self.turno = 0
+        self.tablero = [None] * 9
+        self.message = None
+        for i in range(9):
+            self.add_item(CasillaBtn(i))
+
+    def embed(self, final: str = None):
+        a, b = self.jugadores
+        desc = f"❌ <@{a}>   vs   ⭕ <@{b}>\n\n"
+        desc += final or f"Turno de <@{self.jugadores[self.turno]}> {'❌' if self.turno == 0 else '⭕'}"
+        return discord.Embed(title="❌⭕ Tres en raya", description=desc, color=0x9B59B6 if not final else 0x2ECC71)
+
+    async def jugar(self, interaction: discord.Interaction, boton: CasillaBtn):
+        if interaction.user.id not in self.jugadores:
+            return await interaction.response.send_message("No participas en esta partida.", ephemeral=True)
+        if interaction.user.id != self.jugadores[self.turno]:
+            return await interaction.response.send_message("⏳ Aún no es tu turno.", ephemeral=True)
+
+        marca = "X" if self.turno == 0 else "O"
+        self.tablero[boton.i] = marca
+        boton.emoji = "❌" if marca == "X" else "⭕"
+        boton.label = None
+        boton.style = discord.ButtonStyle.danger if marca == "X" else discord.ButtonStyle.primary
+        boton.disabled = True
+
+        ganador = any(all(self.tablero[x] == marca for x in l) for l in LINEAS_3R)
+        if ganador or all(self.tablero):
+            for c in self.children:
+                c.disabled = True
+            self.stop()
+            final = f"🏆 **¡Gana <@{interaction.user.id}>!**" if ganador else "🤝 **¡Empate!**"
+            return await interaction.response.edit_message(content=None, embed=self.embed(final), view=self)
+
+        self.turno = 1 - self.turno
+        await interaction.response.edit_message(content=None, embed=self.embed(), view=self)
+
+    async def on_timeout(self):
+        for c in self.children:
+            c.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(embed=self.embed("⌛ Partida cancelada por inactividad."), view=self)
+            except discord.HTTPException:
+                pass
+
+
+@tree.command(name="tres-en-raya", description="Juega al tres en raya contra otra persona")
+@app_commands.describe(oponente="Con quién quieres jugar")
+@app_commands.guild_only()
+async def tres_en_raya(interaction: discord.Interaction, oponente: discord.Member):
+    if oponente.bot or oponente.id == interaction.user.id:
+        return await interaction.response.send_message("Elige a otra persona (ni un bot ni tú mismo).", ephemeral=True)
+    view = TresRayaView(interaction.user, oponente)
+    await interaction.response.send_message(
+        content=f"{oponente.mention}, {interaction.user.mention} te retó a un tres en raya.",
+        embed=view.embed(), view=view,
+    )
+    view.message = await interaction.original_response()
+
+
 # ───────────────────────────── /configuracion ────────────────────────────────
 SECCIONES = {
     "sugerencias": ("💡", "Sugerencias", "Canal y roles que aprueban"),
@@ -1334,6 +1594,8 @@ class Menu(discord.ui.Select):
         k = self.values[0]
         if k == "sugerencias":
             return await interaction.response.edit_message(embed=sug_embed(interaction.guild.id), view=SugView())
+        if k == "seguridad":
+            return await interaction.response.edit_message(embed=seg_home_embed(interaction.guild.id), view=SegHomeView())
         if k == "moderacion":
             return await interaction.response.edit_message(embed=mod_home_embed(interaction.guild.id), view=ModHomeView())
         if k == "postulaciones":
@@ -1935,6 +2197,269 @@ class ModHomeView(AdminView):
         await interaction.response.edit_message(embed=home_embed(), view=HomeView())
 
 
+SEG_SECCIONES = {
+    "antibot": ("🤖", "Anti-Bot", "Banea bots no autorizados y a quien los agrega"),
+    "antiraid": ("🚨", "Anti-Raid", "Detecta entradas masivas de cuentas"),
+    "antispam": ("💬", "Anti-Spam", "Frena el flood y las menciones masivas"),
+    "whitelist": ("📃", "White-List", "Usuarios, bots y roles exentos"),
+}
+
+SEG_INFO = {
+    "antibot": (
+        "🤖 Anti-Bot",
+        "Cuando está activo, **cualquier bot que entre al servidor** (aunque esté offline, oculto o sea un "
+        "«bot fantasma») es **baneado**, y también se banea a **quien lo agregó**.\n\n"
+        "**Excepciones:** bots en la White-List y bots agregados por el dueño o por alguien de la White-List.\n\n"
+        "⚠️ Necesito los permisos *Banear miembros* y *Ver registro de auditoría* (para saber quién lo agregó). "
+        "Mi rol debe estar por encima del de quien agregue el bot.",
+    ),
+    "antiraid": (
+        "🚨 Anti-Raid",
+        "Si entran demasiadas cuentas en pocos segundos, aplico la acción elegida a esas cuentas y activo un "
+        "**modo raid de 2 minutos**: cada nueva entrada recibe la misma acción.\n\nLa White-List queda exenta.",
+    ),
+    "antispam": (
+        "💬 Anti-Spam",
+        "Borra los mensajes de quien manda demasiados en poco tiempo, o menciona a demasiada gente en uno solo, "
+        "y lo **aísla (timeout)**.\n\n**Exentos:** administradores, roles de moderación configurados y la White-List.",
+    ),
+}
+
+
+def _estado(on):
+    return "🟢 Activado" if on else "🔴 Desactivado"
+
+
+def seg_home_embed(gid: int):
+    s = cfg(gid)["seg"]
+    e = discord.Embed(title="🛡️ Configurar seguridad", color=0x5865F2,
+                      description="Elige una opción en el menú. Cada una tiene su propio panel.")
+    e.add_field(name="🤖 Anti-Bot", value=_estado(s["antibot"]["on"]), inline=True)
+    e.add_field(name="🚨 Anti-Raid", value=_estado(s["antiraid"]["on"]), inline=True)
+    e.add_field(name="💬 Anti-Spam", value=_estado(s["antispam"]["on"]), inline=True)
+    e.add_field(name="📃 White-List", value=f"{len(s['wl']['usuarios'])} usuario(s)/bot(s) · {len(s['wl']['roles'])} rol(es)", inline=False)
+    e.add_field(name="Canal de registros de seguridad", value=f"<#{s['canal']}>" if s["canal"] else "No configurado", inline=False)
+    return e
+
+
+def seg_panel_embed(gid: int, key: str):
+    s = cfg(gid)["seg"]
+    a = s[key]
+    titulo, desc = SEG_INFO[key]
+    e = discord.Embed(title=titulo, description=desc, color=0x2ECC71 if a["on"] else 0xE74C3C)
+    e.add_field(name="Estado", value=_estado(a["on"]), inline=False)
+    if key == "antiraid":
+        e.add_field(name="Umbral", value=f"{a['joins']} entradas en {a['segundos']} s", inline=True)
+        e.add_field(name="Acción", value="🔨 Banear" if a["accion"] == "ban" else "👢 Expulsar", inline=True)
+    if key == "antispam":
+        e.add_field(name="Límite", value=f"{a['mensajes']} mensajes en {a['segundos']} s", inline=True)
+        e.add_field(name="Menciones", value=f"máx. {a['menciones']} por mensaje", inline=True)
+        e.add_field(name="Aislamiento", value=f"{a['timeout']} min", inline=True)
+    return e
+
+
+def wl_embed(guild):
+    wl = cfg(guild.id)["seg"]["wl"]
+    e = discord.Embed(
+        title="📃 White-List", color=0x5865F2,
+        description="Los usuarios, bots y roles de esta lista están **exentos** de Anti-Raid y Anti-Spam, "
+        "los bots de la lista pueden entrar, y los bots que agreguen son permitidos.\n"
+        "Para permitir un bot, agrégalo **antes** de invitarlo (puedes usar su ID).",
+    )
+    e.add_field(name="Usuarios y bots", value=" ".join(f"<@{u}>" for u in wl["usuarios"]) or "Nadie todavía", inline=False)
+    e.add_field(name="Roles", value=" ".join(f"<@&{r}>" for r in wl["roles"]) or "Ninguno", inline=False)
+    return e
+
+
+class RaidAccionSelect(discord.ui.Select):
+    def __init__(self, actual: str):
+        super().__init__(
+            placeholder="Acción contra los raiders",
+            options=[
+                discord.SelectOption(label="Expulsar (kick)", value="kick", emoji="👢", default=actual == "kick"),
+                discord.SelectOption(label="Banear (ban)", value="ban", emoji="🔨", default=actual == "ban"),
+            ],
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        cfg(interaction.guild.id)["seg"]["antiraid"]["accion"] = self.values[0]
+        save()
+        await interaction.response.edit_message(
+            embed=seg_panel_embed(interaction.guild.id, "antiraid"), view=SegPanelView("antiraid", interaction.guild.id)
+        )
+
+
+class SegAjustesModal(discord.ui.Modal, title="Ajustes"):
+    CAMPOS = {
+        "antiraid": [("joins", "Entradas para detectar raid (2-50)", 2, 50), ("segundos", "En cuántos segundos (3-120)", 3, 120)],
+        "antispam": [
+            ("mensajes", "Mensajes permitidos (2-20)", 2, 20),
+            ("segundos", "En cuántos segundos (2-30)", 2, 30),
+            ("timeout", "Minutos de aislamiento (1-1440)", 1, 1440),
+            ("menciones", "Máx. menciones por mensaje (2-50)", 2, 50),
+        ],
+    }
+
+    def __init__(self, key: str, gid: int):
+        super().__init__()
+        self.key = key
+        a = cfg(gid)["seg"][key]
+        self.inputs = {}
+        for campo, etiqueta, _, _ in self.CAMPOS[key]:
+            ti = discord.ui.TextInput(label=etiqueta, default=str(a[campo]), max_length=5)
+            self.inputs[campo] = ti
+            self.add_item(ti)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        nuevos = {}
+        for campo, etiqueta, lo, hi in self.CAMPOS[self.key]:
+            try:
+                v = int(self.inputs[campo].value)
+            except ValueError:
+                return await interaction.response.send_message(f"❌ «{etiqueta}» debe ser un número.", ephemeral=True)
+            if not lo <= v <= hi:
+                return await interaction.response.send_message(f"❌ «{etiqueta}» debe estar entre {lo} y {hi}.", ephemeral=True)
+            nuevos[campo] = v
+        cfg(interaction.guild.id)["seg"][self.key].update(nuevos)
+        save()
+        await interaction.response.edit_message(
+            embed=seg_panel_embed(interaction.guild.id, self.key), view=SegPanelView(self.key, interaction.guild.id)
+        )
+
+
+class SegPanelView(AdminView):
+    def __init__(self, key: str, gid: int):
+        super().__init__()
+        self.key = key
+        a = cfg(gid)["seg"][key]
+        self.toggle.label = "Desactivar" if a["on"] else "Activar"
+        self.toggle.style = discord.ButtonStyle.danger if a["on"] else discord.ButtonStyle.success
+        if key == "antibot":
+            self.remove_item(self.ajustes)
+        if key == "antiraid":
+            self.add_item(RaidAccionSelect(a["accion"]))
+
+    @discord.ui.button(label="Activar", row=1)
+    async def toggle(self, interaction: discord.Interaction, button: discord.ui.Button):
+        a = cfg(interaction.guild.id)["seg"][self.key]
+        a["on"] = not a["on"]
+        save()
+        await interaction.response.edit_message(
+            embed=seg_panel_embed(interaction.guild.id, self.key), view=SegPanelView(self.key, interaction.guild.id)
+        )
+
+    @discord.ui.button(label="⚙️ Ajustes", style=discord.ButtonStyle.primary, row=1)
+    async def ajustes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(SegAjustesModal(self.key, interaction.guild.id))
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=1)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=seg_home_embed(interaction.guild.id), view=SegHomeView())
+
+
+class WLRemoveSelect(discord.ui.Select):
+    def __init__(self, guild):
+        wl = cfg(guild.id)["seg"]["wl"]
+        opciones = []
+        for uid in wl["usuarios"]:
+            u = guild.get_member(uid) or client.get_user(uid)
+            opciones.append(discord.SelectOption(label=f"👤 {u}"[:100] if u else f"👤 ID {uid}", value=f"u:{uid}"))
+        for rid in wl["roles"]:
+            r = guild.get_role(rid)
+            opciones.append(discord.SelectOption(label=f"🎭 {r.name}"[:100] if r else f"🎭 ID {rid}", value=f"r:{rid}"))
+        super().__init__(placeholder="🗑️ Quitar de la White-List", options=opciones[:25], row=2)
+
+    async def callback(self, interaction: discord.Interaction):
+        wl = cfg(interaction.guild.id)["seg"]["wl"]
+        tipo, _, ident = self.values[0].partition(":")
+        lista = wl["usuarios"] if tipo == "u" else wl["roles"]
+        if int(ident) in lista:
+            lista.remove(int(ident))
+        save()
+        await interaction.response.edit_message(embed=wl_embed(interaction.guild), view=WLView(interaction.guild))
+
+
+class WLIdModal(discord.ui.Modal, title="Agregar por ID"):
+    def __init__(self):
+        super().__init__()
+        self.ident = discord.ui.TextInput(label="ID del usuario o bot", min_length=15, max_length=22, placeholder="123456789012345678")
+        self.add_item(self.ident)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            uid = int(self.ident.value.strip())
+        except ValueError:
+            return await interaction.response.send_message("❌ Eso no parece un ID válido.", ephemeral=True)
+        wl = cfg(interaction.guild.id)["seg"]["wl"]
+        if uid not in wl["usuarios"]:
+            wl["usuarios"].append(uid)
+            save()
+        await interaction.response.edit_message(embed=wl_embed(interaction.guild), view=WLView(interaction.guild))
+
+
+class WLView(AdminView):
+    def __init__(self, guild):
+        super().__init__()
+        wl = cfg(guild.id)["seg"]["wl"]
+        if wl["usuarios"] or wl["roles"]:
+            self.add_item(WLRemoveSelect(guild))
+
+    @discord.ui.select(cls=discord.ui.UserSelect, min_values=1, max_values=10,
+                       placeholder="➕ Agregar usuarios / bots", row=0)
+    async def agregar_usuarios(self, interaction: discord.Interaction, select: discord.ui.UserSelect):
+        wl = cfg(interaction.guild.id)["seg"]["wl"]
+        for u in select.values:
+            if u.id not in wl["usuarios"]:
+                wl["usuarios"].append(u.id)
+        save()
+        await interaction.response.edit_message(embed=wl_embed(interaction.guild), view=WLView(interaction.guild))
+
+    @discord.ui.select(cls=discord.ui.RoleSelect, min_values=1, max_values=10,
+                       placeholder="➕ Agregar roles", row=1)
+    async def agregar_roles(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        wl = cfg(interaction.guild.id)["seg"]["wl"]
+        for r in select.values:
+            if r.id not in wl["roles"]:
+                wl["roles"].append(r.id)
+        save()
+        await interaction.response.edit_message(embed=wl_embed(interaction.guild), view=WLView(interaction.guild))
+
+    @discord.ui.button(label="➕ Agregar por ID", style=discord.ButtonStyle.primary, row=3)
+    async def por_id(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(WLIdModal())
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=3)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=seg_home_embed(interaction.guild.id), view=SegHomeView())
+
+
+class SegHomeView(AdminView):
+    @discord.ui.select(
+        placeholder="¿Qué quieres configurar?",
+        options=[discord.SelectOption(label=n, value=k, emoji=e, description=d) for k, (e, n, d) in SEG_SECCIONES.items()],
+        row=0,
+    )
+    async def elegir(self, interaction: discord.Interaction, select: discord.ui.Select):
+        k = select.values[0]
+        if k == "whitelist":
+            return await interaction.response.edit_message(embed=wl_embed(interaction.guild), view=WLView(interaction.guild))
+        await interaction.response.edit_message(
+            embed=seg_panel_embed(interaction.guild.id, k), view=SegPanelView(k, interaction.guild.id)
+        )
+
+    @discord.ui.select(cls=discord.ui.ChannelSelect, channel_types=[discord.ChannelType.text],
+                       placeholder="Canal de registros de seguridad", row=1)
+    async def canal(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        cfg(interaction.guild.id)["seg"]["canal"] = select.values[0].id
+        save()
+        await interaction.response.edit_message(embed=seg_home_embed(interaction.guild.id), view=SegHomeView())
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=2)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=home_embed(), view=HomeView())
+
+
 @tree.command(name="configuracion", description="Panel de configuración de Nexus")
 @app_commands.default_permissions(administrator=True)
 @app_commands.guild_only()
@@ -1955,7 +2480,7 @@ async def help_cmd(interaction: discord.Interaction):
     )
     embed.add_field(
         name="🎮 Juegos",
-        value="`/ppt @usuario` — piedra, papel o tijera (ambos eligen en secreto)\n`/dado [caras]` — dado de 2 a 16 caras",
+        value="`/ppt @usuario` — piedra, papel o tijera (ambos eligen en secreto)\n`/dado [caras]` — dado de 2 a 16 caras\n`/tres-en-raya @usuario` — tres en raya para 2 jugadores",
         inline=False,
     )
     embed.add_field(
@@ -1984,7 +2509,13 @@ async def help_cmd(interaction: discord.Interaction):
         value="`/postulacion-estado formulario número` (solo staff)",
         inline=False,
     )
-    embed.add_field(name="🚧 Próximamente", value="Seguridad (Anti-Bot/Raid/Spam) y adivina la palabra.", inline=False)
+    embed.add_field(
+        name="🛡️ Seguridad",
+        value="Se configura en `/configuracion → Seguridad`: **Anti-Bot** (banea al bot y a quien lo agregó), "
+        "**Anti-Raid**, **Anti-Spam** y **White-List**. Cada uno tiene su propio panel.",
+        inline=False,
+    )
+    embed.add_field(name="🚧 Próximamente", value="`/adivina-la-palabra` (2-4 jugadores).", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
@@ -1992,6 +2523,10 @@ async def help_cmd(interaction: discord.Interaction):
 @client.event
 async def on_message(m: discord.Message):
     if m.author.bot or not m.guild:
+        return
+
+    # Anti-Spam (si está activo y detecta spam, no se procesa más)
+    if await antispam(m):
         return
 
     # Canal de sugerencias: cada mensaje se convierte en embed
