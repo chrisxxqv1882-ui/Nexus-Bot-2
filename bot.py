@@ -4646,7 +4646,7 @@ def tk_home_embed(gid: int):
     e.add_field(name="Tickets abiertos por usuario", value=f"máx. {t['max']}", inline=True)
     e.add_field(name="Tickets abiertos ahora", value=str(len(t["abiertos"])), inline=True)
     e.add_field(name="Categorías del menú", value=", ".join(c["nombre"] for c in t["cats"]), inline=False)
-    e.set_footer(text="En 📋 Categorías cada una puede tener sus propios roles, ping y bienvenida. Luego usa /ticket-panel.")
+    e.set_footer(text="En 📋 Categorías cada una tiene sus roles, ping y bienvenida. Texto del menú, máximo y roles del panel están en ⚙️ Más ajustes.")
     return e
 
 
@@ -4931,6 +4931,29 @@ class TkMaxModal(discord.ui.Modal, title="Tickets por usuario"):
         await interaction.response.edit_message(embed=tk_home_embed(interaction.guild.id), view=TkHomeView())
 
 
+class TkAjustesView(AdminView):
+    """Ajustes extra de tickets (separados para no pasar el límite de 5 filas de Discord)."""
+
+    @discord.ui.select(cls=discord.ui.RoleSelect, min_values=0, max_values=10,
+                       placeholder="Roles que pueden enviar el panel (/ticket-panel)", row=0)
+    async def roles_panel(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        cfg(interaction.guild.id)["tk"]["panel_roles"] = [r.id for r in select.values]
+        save()
+        await interaction.response.edit_message(embed=tk_home_embed(interaction.guild.id), view=TkAjustesView())
+
+    @discord.ui.button(label="⚙️ Máx. por usuario", style=discord.ButtonStyle.secondary, row=1)
+    async def maximo(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(TkMaxModal(interaction.guild.id))
+
+    @discord.ui.button(label="🔤 Texto del menú", style=discord.ButtonStyle.secondary, row=1)
+    async def texto_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(TkPlaceholderModal(interaction.guild.id))
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=1)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=tk_home_embed(interaction.guild.id), view=TkHomeView())
+
+
 class TkHomeView(AdminView):
     @discord.ui.select(cls=discord.ui.ChannelSelect, channel_types=[discord.ChannelType.category],
                        placeholder="Categoría de Discord donde se crean los tickets", row=0)
@@ -4960,13 +4983,6 @@ class TkHomeView(AdminView):
         save()
         await interaction.response.edit_message(embed=tk_home_embed(interaction.guild.id), view=TkHomeView())
 
-    @discord.ui.select(cls=discord.ui.RoleSelect, min_values=0, max_values=10,
-                       placeholder="Roles que pueden enviar el panel (/ticket-panel)", row=5)
-    async def roles_panel(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
-        cfg(interaction.guild.id)["tk"]["panel_roles"] = [r.id for r in select.values]
-        save()
-        await interaction.response.edit_message(embed=tk_home_embed(interaction.guild.id), view=TkHomeView())
-
     @discord.ui.button(label="📋 Categorías", style=discord.ButtonStyle.primary, row=4)
     async def cats(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(embed=tk_cats_embed(interaction.guild.id), view=TkCatsView(interaction.guild.id))
@@ -4975,15 +4991,11 @@ class TkHomeView(AdminView):
     async def embeds(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(embed=tk_embeds_menu_embed(), view=TkEmbedsMenuView())
 
-    @discord.ui.button(label="⚙️ Máx. por usuario", style=discord.ButtonStyle.secondary, row=3)
-    async def maximo(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(TkMaxModal(interaction.guild.id))
+    @discord.ui.button(label="⚙️ Más ajustes", style=discord.ButtonStyle.secondary, row=4)
+    async def ajustes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=tk_home_embed(interaction.guild.id), view=TkAjustesView())
 
-    @discord.ui.button(label="🔤 Texto del menú", style=discord.ButtonStyle.secondary, row=3)
-    async def texto_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(TkPlaceholderModal(interaction.guild.id))
-
-    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=3)
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=4)
     async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(embed=home_embed(), view=HomeView())
 
