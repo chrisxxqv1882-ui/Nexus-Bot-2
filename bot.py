@@ -56,6 +56,9 @@ def cfg(guild_id):
                       "color": "5865F2", "autor": None, "miniatura": None, "imagen": None, "footer": None},
         "borrar_trigger": False,
     })
+    g["auto"].setdefault("cada", 0)               # enviar el mensaje cada N mensajes (0 = desactivado)
+    g["auto"].setdefault("borrar_anterior", True)  # borrar el mensaje anterior del bot al enviar el nuevo
+    g["auto"].setdefault("ultimos", {})            # canal -> id del último mensaje enviado
 
     g.setdefault("seg", {
         "canal": None,
@@ -2833,6 +2836,9 @@ TK_VARIABLES = {
     "{categoria}": "Categoría elegida",
     "{staff}": "Staff que cierra el ticket",
     "{servidor}": "Nombre del servidor",
+    "{nota}": "Nota dada, ej: 5/5 (solo en el registro de valoración)",
+    "{estrellas}": "Estrellas, ej: ⭐⭐⭐⭐☆ (solo en el registro de valoración)",
+    "{comentario}": "Nota/comentario escrito por el usuario (solo en el registro de valoración)",
 }
 
 
@@ -2851,11 +2857,22 @@ def default_tk_embeds():
         "reclamacion": {**base, "titulo": "🙋 Ticket #{numero} reclamado",
                    "descripcion": "Hola {usuario}, el staff {staff} ha reclamado tu ticket.",
                    "color": "5865F2"},
+        "valoracion": {**base, "titulo": "⭐ Antes de cerrar este ticket",
+                   "descripcion": "{usuario}, el ticket **#{numero}** está listo para cerrarse.\n\n"
+                                  "Pulsa **Valorar atención** para calificar al staff que te atendió (del 1 al 5) y dejar una nota.",
+                   "color": "F1C40F", "footer": "El ticket se cerrará automáticamente después de registrar tu valoración."},
+        "resena": {**base, "titulo": "⭐ Nueva valoración — Ticket #{numero}",
+                   "descripcion": "**Usuario:** {usuario}\n**Staff:** {staff}\n**Categoría:** {categoria}\n\n"
+                                  "**Valoración:** {estrellas} — **{nota}**\n**Nota:** {comentario}",
+                   "color": "F1C40F"},
     }
 
 
-def tk_vars(guild, rec=None, staff="—"):
+def tk_vars(guild, rec=None, staff="—", nota="—", estrellas="—", comentario="—"):
     return {
+        "{nota}": nota,
+        "{estrellas}": estrellas,
+        "{comentario}": comentario,
         "{usuario}": f"<@{rec['usuario']}>" if rec else "—",
         "{numero}": str(rec["numero"]) if rec else "—",
         "{categoria}": rec["categoria"] if rec else "—",
@@ -3003,20 +3020,11 @@ async def iniciar_cierre_ticket(interaction: discord.Interaction, rec, razon):
     }
     save()
 
-    e = discord.Embed(
-        title="⭐ Antes de cerrar este ticket",
-        description=(
-            f"{interaction.user.mention}, el ticket **#{rec['numero']}** está listo para cerrarse.\n\n"
-            "Por favor, **valora la atención del staff** que te atendió antes de finalizar el ticket.\n"
-            "Tu valoración se guardará en el canal configurado por la administración."
-        ),
-        color=0xF1C40F,
-    )
-    e.set_footer(text="El ticket se cerrará automáticamente después de registrar la valoración.")
+    e = post_embed(t["embeds"]["valoracion"], tk_vars(g, rec, staff=f"<@{staff_id}>"))
     await interaction.response.send_message(embed=e, view=RatingView())
 
 
-async def cerrar_ticket(interaction: discord.Interaction, rec, razon, rating=None):
+async def cerrar_ticket(interaction: discord.Interaction, rec, razon, rating=None, comentario=None):
     """Finaliza el ticket, guarda transcript y registra la valoración si existe."""
     g = interaction.guild
     t = cfg(g.id)["tk"]
@@ -3039,7 +3047,8 @@ async def cerrar_ticket(interaction: discord.Interaction, rec, razon, rating=Non
         lineas.append(f"[{m.created_at:%Y-%m-%d %H:%M}] {m.author} ({m.author.id}): {texto.strip()}")
     datos = ("\n".join(lineas) or "(sin mensajes)").encode("utf-8")
     nombre = f"transcripcion-ticket-{rec['numero']:04d}.txt"
-    vars_ = tk_vars(g, rec, staff=f"<@{rec.get('reclamado') or interaction.user.id}>")
+    _pend0 = t.get("rating_pending", {}).get(str(canal.id), {})
+    vars_ = tk_vars(g, rec, staff=f"<@{_pend0.get('cerrado_por') or rec.get('reclamado') or interaction.user.id}>")
 
     def embed_cierre():
         e = post_embed(t["embeds"]["cierre"], vars_)
@@ -3060,24 +3069,24 @@ async def cerrar_ticket(interaction: discord.Interaction, rec, razon, rating=Non
     if rating is not None:
         entry_id = str(len(t["valoraciones"]) + 1)
         pending = t.get("rating_pending", {}).get(str(canal.id), {})
+        staff_val = pending.get("staff") or rec.get("reclamado") or interaction.user.id
         t["valoraciones"][entry_id] = {
             "numero": rec["numero"], "usuario": rec["usuario"],
-            "staff": rec.get("reclamado") or interaction.user.id,
+            "staff": staff_val,
             "categoria": rec["categoria"], "rating": rating,
+            "comentario": comentario or "",
             "ts_rating": int(time.time()),
         }
         valor_channel = g.get_channel(t.get("canal_valoraciones")) if t.get("canal_valoraciones") else None
         if valor_channel:
             estrellas = "⭐" * rating + "☆" * (5 - rating)
-            ve = discord.Embed(
-                title="⭐ Nueva valoración de ticket",
-                description=f"**Ticket:** #{rec['numero']}\n**Usuario:** <@{rec['usuario']}>\n**Staff:** <@{rec.get('reclamado') or interaction.user.id}>\n**Categoría:** {rec['categoria']}\n\n**Valoración:** {estrellas} — **{rating}/5**",
-                color=0xF1C40F,
-            )
+            ve = post_embed(t["embeds"]["resena"], tk_vars(
+                g, rec, staff=f"<@{staff_val}>", nota=f"{rating}/5",
+                estrellas=estrellas, comentario=(comentario or "Sin nota")[:1000]))
             if razon:
                 ve.add_field(name="Razón de cierre", value=razon[:1000], inline=False)
             try:
-                await valor_channel.send(embed=ve)
+                await valor_channel.send(embed=ve, allowed_mentions=discord.AllowedMentions.none())
             except discord.HTTPException:
                 pass
 
@@ -3127,14 +3136,47 @@ class TkUserView(discord.ui.View):
 
 
 
-class RatingButton(discord.ui.Button):
-    def __init__(self, stars: int):
-        super().__init__(label=f"{stars} ⭐", style=discord.ButtonStyle.primary,
-                         custom_id=f"tk:rating:{stars}", row=0)
-        self.stars = stars
+class ValorarModal(discord.ui.Modal, title="Valorar atención"):
+    def __init__(self):
+        super().__init__()
+        self.nota = discord.ui.TextInput(label="Calificación (del 1 al 5)", placeholder="Ej: 5", min_length=1, max_length=1)
+        self.comentario = discord.ui.TextInput(
+            label="Nota (opcional)", style=discord.TextStyle.paragraph, required=False, max_length=500,
+            placeholder="Cuéntanos cómo fue la atención")
+        self.add_item(self.nota)
+        self.add_item(self.comentario)
 
-    async def callback(self, interaction: discord.Interaction):
-        # La valoración se realiza dentro del ticket; al elegirla, el ticket se cierra.
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            estrellas = int(self.nota.value.strip())
+            if not 1 <= estrellas <= 5:
+                raise ValueError
+        except ValueError:
+            return await interaction.response.send_message("❌ La calificación debe ser un número del 1 al 5. Pulsa **Valorar atención** e inténtalo de nuevo.", ephemeral=True)
+        t = cfg(interaction.guild.id)["tk"]
+        pending = t.get("rating_pending", {}).get(str(interaction.channel.id))
+        rec = t["abiertos"].get(str(interaction.channel.id))
+        if not pending or not rec:
+            return await interaction.response.send_message("⚠️ Este ticket ya no está esperando una valoración.", ephemeral=True)
+        if interaction.user.id != pending.get("usuario"):
+            return await interaction.response.send_message("❌ Solo quien abrió el ticket puede valorar la atención.", ephemeral=True)
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                title="⭐ Valoración registrada",
+                description=f"Gracias por valorar la atención con **{estrellas}/5 ⭐**.\n\n🔒 Cerrando el ticket...",
+                color=0x2ECC71,
+            ), view=None
+        )
+        await cerrar_ticket(interaction, rec, pending.get("razon", ""), rating=estrellas,
+                            comentario=self.comentario.value.strip())
+
+
+class RatingView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Valorar atención", emoji="⭐", style=discord.ButtonStyle.primary, custom_id="tk:rate")
+    async def valorar(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.guild or not interaction.channel:
             return await interaction.response.send_message("⚠️ Esta valoración ya no está disponible.", ephemeral=True)
         t = cfg(interaction.guild.id)["tk"]
@@ -3143,29 +3185,7 @@ class RatingButton(discord.ui.Button):
             return await interaction.response.send_message("⚠️ Este ticket ya no está esperando una valoración.", ephemeral=True)
         if interaction.user.id != pending.get("usuario"):
             return await interaction.response.send_message("❌ Solo quien abrió el ticket puede valorar la atención.", ephemeral=True)
-
-        rec = t["abiertos"].get(str(interaction.channel.id))
-        if not rec:
-            return await interaction.response.send_message("⚠️ Este ticket ya no está registrado.", ephemeral=True)
-
-        # Deshabilita los botones mientras se procesa el cierre.
-        for item in interaction.message.components:
-            pass
-        await interaction.response.edit_message(
-            embed=discord.Embed(
-                title="⭐ Valoración registrada",
-                description=f"Gracias por valorar la atención con **{self.stars}/5 ⭐**.\n\n🔒 Cerrando el ticket...",
-                color=0x2ECC71,
-            ), view=None
-        )
-        await cerrar_ticket(interaction, rec, pending.get("razon", ""), rating=self.stars)
-
-
-class RatingView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        for stars in range(1, 6):
-            self.add_item(RatingButton(stars))
+        await interaction.response.send_modal(ValorarModal())
 
 
 class StaffApprovalView(discord.ui.View):
@@ -3324,6 +3344,100 @@ async def ticket_panel(interaction: discord.Interaction, canal: Optional[discord
     await interaction.response.send_message(f"✅ Panel enviado en {destino.mention}.{aviso}", ephemeral=True)
 
 
+# ─────────────────────── Panel de roles con botones ───────────────────────
+class RolBoton(discord.ui.Button):
+    """Botón de panel de roles. El custom_id lleva la acción y el rol, así sigue funcionando tras reiniciar."""
+    def __init__(self, accion: str, rol: discord.Role, row: int):
+        etiqueta = {"t": "", "a": "➕ ", "q": "➖ "}[accion] + rol.name
+        estilo = {"t": discord.ButtonStyle.primary, "a": discord.ButtonStyle.success, "q": discord.ButtonStyle.danger}[accion]
+        super().__init__(label=etiqueta[:80], style=estilo, custom_id=f"rolpanel:{accion}:{rol.id}", row=row)
+
+
+class RolPanelView(discord.ui.View):
+    def __init__(self, roles, modo: str):
+        super().__init__(timeout=None)
+        fila = 0
+        for r in roles:
+            acciones = ["a", "q"] if modo == "dar_y_quitar" else [{"alternar": "t", "solo_dar": "a", "solo_quitar": "q"}[modo]]
+            for ac in acciones:
+                self.add_item(RolBoton(ac, r, min(fila, 4)))
+            if modo == "dar_y_quitar":
+                fila += 1
+        # alternar/solo_*: hasta 5 botones por fila
+
+
+async def manejar_rol_panel(interaction: discord.Interaction):
+    try:
+        _, accion, rid = interaction.data["custom_id"].split(":")
+        rol = interaction.guild.get_role(int(rid))
+    except (ValueError, KeyError, AttributeError):
+        return
+    if rol is None:
+        return await interaction.response.send_message("❌ Ese rol ya no existe.", ephemeral=True)
+    miembro = interaction.user
+    if rol.managed or rol.is_default() or interaction.guild.me.top_role <= rol:
+        return await interaction.response.send_message("❌ No puedo gestionar ese rol (está por encima de mi rol o es especial).", ephemeral=True)
+    try:
+        if accion == "a" or (accion == "t" and rol not in miembro.roles):
+            if rol in miembro.roles:
+                return await interaction.response.send_message(f"ℹ️ Ya tienes el rol {rol.mention}.", ephemeral=True)
+            await miembro.add_roles(rol, reason="[Nexus] Panel de roles")
+            msg = f"✅ Se te agregó el rol {rol.mention}."
+        else:
+            if rol not in miembro.roles:
+                return await interaction.response.send_message(f"ℹ️ No tienes el rol {rol.mention}.", ephemeral=True)
+            await miembro.remove_roles(rol, reason="[Nexus] Panel de roles")
+            msg = f"✅ Se te quitó el rol {rol.mention}."
+    except discord.HTTPException:
+        return await interaction.response.send_message("❌ No pude cambiar tu rol. Revisa mis permisos.", ephemeral=True)
+    await interaction.response.send_message(msg, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+
+@client.event
+async def on_interaction(interaction: discord.Interaction):
+    if interaction.type is discord.InteractionType.component and interaction.guild:
+        cid = (interaction.data or {}).get("custom_id", "")
+        if cid.startswith("rolpanel:"):
+            await manejar_rol_panel(interaction)
+
+
+@tree.command(name="panel-rol", description="Envía un embed con botones para agregar o quitar roles")
+@app_commands.describe(
+    rol="Rol del botón", modo="Qué hace el botón",
+    titulo="Título del embed", descripcion="Texto del embed",
+    canal="Canal donde se enviará (por defecto, este)",
+    rol2="Segundo rol (opcional)", rol3="Tercer rol (opcional)",
+)
+@app_commands.choices(modo=[
+    app_commands.Choice(name="Alternar (da o quita)", value="alternar"),
+    app_commands.Choice(name="Dos botones: agregar y quitar", value="dar_y_quitar"),
+    app_commands.Choice(name="Solo agregar", value="solo_dar"),
+    app_commands.Choice(name="Solo quitar", value="solo_quitar"),
+])
+@app_commands.default_permissions(administrator=True)
+@app_commands.guild_only()
+async def panel_rol(interaction: discord.Interaction, rol: discord.Role, modo: str = "alternar",
+                    titulo: str = "🎭 Elige tu rol", descripcion: str = "Pulsa el botón para obtener o quitar el rol.",
+                    canal: Optional[discord.TextChannel] = None,
+                    rol2: Optional[discord.Role] = None, rol3: Optional[discord.Role] = None):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("❌ Solo administradores.", ephemeral=True)
+    roles = [r for r in (rol, rol2, rol3) if r is not None]
+    for r in roles:
+        if r.managed or r.is_default() or interaction.guild.me.top_role <= r:
+            return await interaction.response.send_message(
+                f"❌ No puedo gestionar {r.mention}: debe estar **por debajo de mi rol** y no ser un rol especial.", ephemeral=True)
+        if interaction.user.id != interaction.guild.owner_id and interaction.user.top_role <= r:
+            return await interaction.response.send_message(f"❌ {r.mention} está por encima o al nivel de tu rol más alto.", ephemeral=True)
+    destino = canal or interaction.channel
+    emb = discord.Embed(title=titulo[:256], description=descripcion[:2000], color=0x5865F2)
+    try:
+        await destino.send(embed=emb, view=RolPanelView(roles, modo))
+    except discord.HTTPException:
+        return await interaction.response.send_message(f"❌ No puedo enviar mensajes en {destino.mention}.", ephemeral=True)
+    await interaction.response.send_message(f"✅ Panel enviado en {destino.mention}.", ephemeral=True)
+
+
 # ───────────────────────────── /configuracion ────────────────────────────────
 SECCIONES = {
     "sugerencias": ("💡", "Sugerencias", "Canal y roles que aprueban"),
@@ -3428,7 +3542,10 @@ def auto_embed(gid):
     e = discord.Embed(title="💬 Auto-Responder", color=0x5865F2)
     e.add_field(name="Estado", value=_estado(a["on"]), inline=True)
     e.add_field(name="Canal", value=f"<#{a['canal']}>" if a["canal"] else "Todos los canales", inline=True)
-    e.add_field(name="Disparador", value=f"`{a['trigger']}`", inline=False)
+    e.add_field(name="Disparador", value=f"`{a['trigger']}`" if a.get("trigger") else "Ninguno", inline=True)
+    cada = int(a.get("cada") or 0)
+    e.add_field(name="Enviar cada", value=f"{cada} mensajes" if cada > 0 else "Desactivado", inline=True)
+    e.add_field(name="Borrar el anterior", value="Sí" if a.get("borrar_anterior", True) else "No", inline=True)
     e.add_field(name="Borrar mensaje original", value="Sí" if a.get("borrar_trigger") else "No", inline=True)
     e.add_field(name="Respuesta", value=r.get("titulo") or "Sin título", inline=False)
     return e
@@ -3438,11 +3555,11 @@ class AutoResponderModal(discord.ui.Modal, title="Configurar auto-responder"):
     def __init__(self, gid):
         super().__init__()
         a = cfg(gid)["auto"]
-        self.trigger = discord.ui.TextInput(label="Mensaje/disparador", default=a.get("trigger",""), max_length=100)
-        self.title = discord.ui.TextInput(label="Título del embed", default=a["respuesta"].get("titulo",""), required=False, max_length=256)
+        self.trigger = discord.ui.TextInput(label="Disparador (opcional)", default=a.get("trigger",""), required=False, max_length=100)
+        self.titulo_in = discord.ui.TextInput(label="Título del embed", default=a["respuesta"].get("titulo",""), required=False, max_length=256)
         self.desc = discord.ui.TextInput(label="Descripción del embed", default=a["respuesta"].get("descripcion",""), style=discord.TextStyle.paragraph, max_length=2000)
         self.color = discord.ui.TextInput(label="Color HEX", default=a["respuesta"].get("color","5865F2"), max_length=7)
-        self.add_item(self.trigger); self.add_item(self.title); self.add_item(self.desc); self.add_item(self.color)
+        self.add_item(self.trigger); self.add_item(self.titulo_in); self.add_item(self.desc); self.add_item(self.color)
 
     async def on_submit(self, interaction: discord.Interaction):
         a = cfg(interaction.guild.id)["auto"]
@@ -3453,7 +3570,26 @@ class AutoResponderModal(discord.ui.Modal, title="Configurar auto-responder"):
         except ValueError:
             return await interaction.response.send_message("❌ El color debe ser HEX, por ejemplo `5865F2`.", ephemeral=True)
         a["trigger"] = self.trigger.value.strip()
-        a["respuesta"].update({"titulo": self.title.value.strip(), "descripcion": self.desc.value, "color": color})
+        a["respuesta"].update({"titulo": self.titulo_in.value.strip(), "descripcion": self.desc.value, "color": color})
+        save()
+        await interaction.response.edit_message(embed=auto_embed(interaction.guild.id), view=AutoResponderView())
+
+
+class AutoCadaModal(discord.ui.Modal, title="Enviar cada N mensajes"):
+    def __init__(self, gid):
+        super().__init__()
+        self.valor = discord.ui.TextInput(
+            label="Cada cuántos mensajes (0 = desactivado)", default=str(cfg(gid)["auto"].get("cada", 0)), max_length=3)
+        self.add_item(self.valor)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            v = int(self.valor.value.strip())
+            if not 0 <= v <= 500:
+                raise ValueError
+        except ValueError:
+            return await interaction.response.send_message("❌ Escribe un número del 0 al 500.", ephemeral=True)
+        cfg(interaction.guild.id)["auto"]["cada"] = v
         save()
         await interaction.response.edit_message(embed=auto_embed(interaction.guild.id), view=AutoResponderView())
 
@@ -3483,9 +3619,55 @@ class AutoResponderView(AdminView):
         save()
         await interaction.response.edit_message(embed=auto_embed(interaction.guild.id), view=AutoResponderView())
 
+    @discord.ui.button(label="🔁 Cada N mensajes", style=discord.ButtonStyle.primary, row=2)
+    async def cada(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AutoCadaModal(interaction.guild.id))
+
+    @discord.ui.button(label="♻️ Borrar anterior", style=discord.ButtonStyle.secondary, row=2)
+    async def borrar_anterior(self, interaction: discord.Interaction, button: discord.ui.Button):
+        a = cfg(interaction.guild.id)["auto"]
+        a["borrar_anterior"] = not a.get("borrar_anterior", True)
+        save()
+        await interaction.response.edit_message(embed=auto_embed(interaction.guild.id), view=AutoResponderView())
+
     @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=2)
     async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(embed=home_embed(), view=HomeView())
+
+
+_AUTO_CONT = {}  # (servidor, canal) -> mensajes contados desde el último envío
+
+
+async def enviar_auto_respuesta(canal, ar):
+    """Envía el embed del auto-responder sin pings y borra el mensaje anterior."""
+    st = ar["respuesta"]
+    try:
+        color = int(st.get("color", "5865F2").lstrip("#"), 16)
+    except ValueError:
+        color = 0x5865F2
+    emb = discord.Embed(title=st.get("titulo") or None, description=st.get("descripcion") or None, color=color)
+    if st.get("autor"):
+        emb.set_author(name=st["autor"])
+    if st.get("miniatura"):
+        emb.set_thumbnail(url=st["miniatura"])
+    if st.get("imagen"):
+        emb.set_image(url=st["imagen"])
+    if st.get("footer"):
+        emb.set_footer(text=st["footer"])
+    try:
+        nuevo = await canal.send(embed=emb, allowed_mentions=discord.AllowedMentions.none())
+    except discord.HTTPException:
+        return None
+    ultimos = ar.setdefault("ultimos", {})
+    anterior = ultimos.get(str(canal.id))
+    if ar.get("borrar_anterior", True) and anterior:
+        try:
+            await canal.get_partial_message(anterior).delete()
+        except discord.HTTPException:
+            pass
+    ultimos[str(canal.id)] = nuevo.id
+    save()
+    return nuevo
 
 
 class HomeView(AdminView):
@@ -4631,6 +4813,8 @@ TK_EMBED_NOMBRES = {
     "ticket": "Mensaje dentro del ticket",
     "cierre": "Registro de cierre (canal y MD)",
     "reclamacion": "Aviso cuando un staff reclama el ticket",
+    "valoracion": "Mensaje para valorar la atención (botón Valorar)",
+    "resena": "Registro de la valoración (canal de valoraciones)",
 }
 
 
@@ -4675,7 +4859,10 @@ def tk_embed_panel(guild, user_id: int, key: str):
         color=0x5865F2,
     )
     rec = {"numero": 1, "usuario": user_id, "categoria": key[4:] if key.startswith("cat:") else t["cats"][0]["nombre"]}
-    return [info, post_embed(t["embeds"][key], tk_vars(guild, rec, staff=f"<@{user_id}>"))]
+    extra = {}
+    if key == "resena":
+        extra = {"nota": "5/5", "estrellas": "⭐⭐⭐⭐⭐", "comentario": "¡Muy buena atención, gracias!"}
+    return [info, post_embed(t["embeds"][key], tk_vars(guild, rec, staff=f"<@{user_id}>", **extra))]
 
 
 async def volver_tk_menu(interaction: discord.Interaction):
@@ -6153,32 +6340,24 @@ async def on_message(m: discord.Message):
 
     # Auto-Responder: responde automáticamente con un embed configurable.
     ar = cfg(m.guild.id)["auto"]
-    if ar.get("on") and ar.get("trigger"):
-        if (ar.get("canal") is None or m.channel.id == ar.get("canal")) and ar["trigger"].lower() in m.content.lower():
-            st = ar["respuesta"]
-            try:
-                color = int(st.get("color", "5865F2").lstrip("#"), 16)
-            except ValueError:
-                color = 0x5865F2
-            emb = discord.Embed(
-                title=st.get("titulo") or None,
-                description=st.get("descripcion") or None,
-                color=color,
-            )
-            if st.get("autor"):
-                emb.set_author(name=st["autor"])
-            if st.get("miniatura"):
-                emb.set_thumbnail(url=st["miniatura"])
-            if st.get("imagen"):
-                emb.set_image(url=st["imagen"])
-            if st.get("footer"):
-                emb.set_footer(text=st["footer"])
-            try:
-                await m.channel.send(embed=emb)
-                if ar.get("borrar_trigger"):
+    if ar.get("on") and (ar.get("canal") is None or m.channel.id == ar.get("canal")):
+        trig = (ar.get("trigger") or "").strip()
+        por_trigger = bool(trig) and trig.lower() in m.content.lower()
+        disparar = por_trigger
+        cada = int(ar.get("cada") or 0)
+        if cada > 0:
+            clave = (m.guild.id, m.channel.id)
+            _AUTO_CONT[clave] = _AUTO_CONT.get(clave, 0) + 1
+            if _AUTO_CONT[clave] >= cada:
+                disparar = True
+        if disparar:
+            _AUTO_CONT[(m.guild.id, m.channel.id)] = 0
+            await enviar_auto_respuesta(m.channel, ar)
+            if por_trigger and ar.get("borrar_trigger"):
+                try:
                     await m.delete()
-            except discord.HTTPException:
-                pass
+                except discord.HTTPException:
+                    pass
 
     # Canal de sugerencias: cada mensaje se convierte en embed
     c = cfg(m.guild.id)["sug"]
