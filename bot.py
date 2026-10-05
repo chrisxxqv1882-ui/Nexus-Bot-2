@@ -492,48 +492,6 @@ async def finalizar_evento(
     if not puede_organizar(interaction.user):
         return await interaction.response.send_message("❌ No tienes permiso para esto.", ephemeral=True)
     ev = cfg(interaction.guild.id)["ev"]["activos"].get(evento)
-    if not ev or ev["estado"] != "abierto":
-        return await interaction.response.send_message("⚠️ Ese evento no existe o ya fue iniciado.", ephemeral=True)
-    await interaction.response.defer(ephemeral=True)
-    ev["estado"] = "iniciado"
-    save()
-    canal, msg = await mensaje_evento(interaction.guild, ev)
-    if msg:
-        await msg.edit(embed=build_event_embed(ev), view=EventoView(cerrado=True))
-    if canal:
-        await canal.send(
-            f"▶️ **¡El evento ha comenzado!** Organiza <@{ev['organizador']}> · "
-            f"{len(ev['participantes'])} participante(s).",
-            allowed_mentions=discord.AllowedMentions.none(),
-        )
-    await interaction.followup.send("✅ Evento iniciado.", ephemeral=True)
-
-
-@iniciar_evento.autocomplete("evento")
-async def ac_iniciar(interaction: discord.Interaction, current: str):
-    return await eventos_ac(interaction, current, "abierto")
-
-
-@tree.command(name="finalizar-evento", description="Finaliza un evento iniciado y anuncia ganadores")
-@app_commands.describe(
-    evento="Evento a finalizar",
-    ganador="Ganador (o 1.º lugar)",
-    segundo="2.º lugar (opcional, para top 3)",
-    tercero="3.º lugar (opcional, para top 3)",
-    foto="Foto del premio entregado (opcional)",
-)
-@app_commands.guild_only()
-async def finalizar_evento(
-    interaction: discord.Interaction,
-    evento: str,
-    ganador: Optional[discord.Member] = None,
-    segundo: Optional[discord.Member] = None,
-    tercero: Optional[discord.Member] = None,
-    foto: Optional[discord.Attachment] = None,
-):
-    if not puede_organizar(interaction.user):
-        return await interaction.response.send_message("❌ No tienes permiso para esto.", ephemeral=True)
-    ev = cfg(interaction.guild.id)["ev"]["activos"].get(evento)
     if not ev or ev["estado"] != "iniciado":
         return await interaction.response.send_message("⚠️ Ese evento no existe o aún no fue iniciado.", ephemeral=True)
     if foto and not (foto.content_type or "").startswith("image/"):
