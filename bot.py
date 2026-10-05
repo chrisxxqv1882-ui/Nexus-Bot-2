@@ -3699,7 +3699,7 @@ class Menu(discord.ui.Select):
         if k == "reaccionroles":
             return await interaction.response.edit_message(embed=reaction_roles_embed(interaction.guild.id), view=ReactionRolesView())
         if k == "autopings":
-            return await interaction.response.edit_message(embed=autopings_embed(interaction.guild.id), view=AutoPingsView())
+            return await interaction.response.edit_message(embed=autopings_embed(interaction.guild.id), view=AutoPingsView(interaction.guild.id))
         if k == "juegos":
             return await interaction.response.edit_message(embed=juegos_menu_embed(), view=JuegosMenuView())
         if k == "seguridad":
@@ -5254,11 +5254,11 @@ class ReactionRolesView(AdminView):
 
 def autopings_embed(gid):
     a=cfg(gid)["autopings"]
-    e=discord.Embed(title="🔔 Mensajes automáticos",description="Crea mensajes que se envían cada cierta cantidad de mensajes, con botones para activar o desactivar un rol de ping.",color=0x5865F2)
+    e=discord.Embed(title="🔔 Mensajes automáticos",description="Crea mensajes que se envían cada cierta cantidad de mensajes, sin mencionar a nadie. **Desactivar** da el rol elegido y **Activar** se lo quita.",color=0x5865F2)
     e.add_field(name="Estado",value=_estado(a.get("on",False)),inline=True)
     for key,item in list(a.get("items",{}).items())[:8]:
         estado="🟢" if item.get("on") else "🔴"; borrar="Sí" if item.get("delete_previous") else "No"
-        e.add_field(name=f"{estado} {item.get('nombre',key)}",value=f"Canal: <#{item.get('canal')}>\nCada **{item.get('cada',2)}** mensajes · Rol de ping: <@&{item.get('rol')}>\nBorrar anterior: **{borrar}**",inline=False)
+        e.add_field(name=f"{estado} {item.get('nombre',key)}",value=f"Canal: <#{item.get('canal')}>\nCada **{item.get('cada',2)}** mensajes · Rol que se agrega al desactivar: <@&{item.get('rol')}>\nBorrar anterior: **{borrar}** · ID: `{key}`",inline=False)
     return e
 
 class AutoPingMessageView(discord.ui.View):
@@ -5271,61 +5271,133 @@ class AutoPingMessageView(discord.ui.View):
         if not interaction.guild: return False
         parts=interaction.data.get("custom_id","").split(":")
         item=cfg(interaction.guild.id)["autopings"]["items"].get(self.key)
-        if not item: return False
+        if not item:
+            await interaction.response.send_message("⚠️ Este mensaje automático ya no existe.",ephemeral=True)
+            return False
         role=interaction.guild.get_role(item.get("rol"))
-        if not role: return False
+        if not role:
+            await interaction.response.send_message("⚠️ El rol de este mensaje ya no existe.",ephemeral=True)
+            return False
         accion=parts[-1]
         try:
-            if accion=="on": await interaction.user.add_roles(role,reason="[Nexus] Activar ping")
-            else: await interaction.user.remove_roles(role,reason="[Nexus] Desactivar ping")
+            if accion=="on": await interaction.user.remove_roles(role,reason="[Nexus] Activar ping (quita el rol)")
+            else: await interaction.user.add_roles(role,reason="[Nexus] Desactivar ping (da el rol)")
             await interaction.response.send_message(f"{'🔔 Ping activado' if accion=='on' else '🔕 Ping desactivado'}.",ephemeral=True)
         except discord.HTTPException:
             await interaction.response.send_message("❌ No pude modificar tu rol.",ephemeral=True)
         return False
 
-class AutoPingModal(discord.ui.Modal,title="Nuevo mensaje automático"):
-    nombre=discord.ui.TextInput(label="Nombre",placeholder="Ej: Aviso general")
-    canal=discord.ui.TextInput(label="ID del canal",placeholder="123456789012345678")
-    rol=discord.ui.TextInput(label="ID del rol de ping",placeholder="123456789012345678")
-    cada=discord.ui.TextInput(label="Cada cuántos mensajes",default="2",placeholder="2")
-    texto=discord.ui.TextInput(label="Mensaje",style=discord.TextStyle.paragraph,placeholder="︶︶ Para activar/desactivar este ping usa los botones de abajo ☙☙")
-    async def on_submit(self,interaction):
-        try: cid=int(self.canal.value); rid=int(self.rol.value); cada=max(1,int(self.cada.value))
-        except ValueError: return await interaction.response.send_message("❌ Canal, rol y cantidad deben ser válidos.",ephemeral=True)
-        if not interaction.guild.get_channel(cid) or not interaction.guild.get_role(rid): return await interaction.response.send_message("❌ No encuentro el canal o rol.",ephemeral=True)
+def autoping_crear_embed(canal_id=None, rol_id=None):
+    e = discord.Embed(
+        title="➕ Nuevo mensaje automático",
+        description="1️⃣ Elige el **canal** donde se enviará.\n2️⃣ Elige el **rol que se agregará** al pulsar **Desactivar** (con **Activar** se quita).\n3️⃣ Pulsa **Continuar** para escribir el mensaje.",
+        color=0x5865F2)
+    e.add_field(name="Canal", value=f"<#{canal_id}>" if canal_id else "—", inline=True)
+    e.add_field(name="Rol que se agrega", value=f"<@&{rol_id}>" if rol_id else "—", inline=True)
+    return e
+
+
+class AutoPingModal(discord.ui.Modal, title="Nuevo mensaje automático"):
+    def __init__(self, canal_id: int, rol_id: int):
+        super().__init__()
+        self.canal_id, self.rol_id = canal_id, rol_id
+        self.nombre = discord.ui.TextInput(label="Nombre (solo para ti)", placeholder="Ej: Aviso general", max_length=80)
+        self.cada = discord.ui.TextInput(label="Cada cuántos mensajes", default="2", placeholder="2", max_length=3)
+        self.texto = discord.ui.TextInput(
+            label="Mensaje", style=discord.TextStyle.paragraph, max_length=2000,
+            default="︶︶ Para activar/desactivar este ping usa los botones de abajo ☙☙")
+        self.add_item(self.nombre); self.add_item(self.cada); self.add_item(self.texto)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            cada = max(1, int(self.cada.value.strip()))
+        except ValueError:
+            return await interaction.response.send_message("❌ «Cada cuántos mensajes» debe ser un número.", ephemeral=True)
         import uuid
-        key=str(uuid.uuid4())[:8]
-        cfg(interaction.guild.id)["autopings"]["items"][key]={"nombre":self.nombre.value[:80],"canal":cid,"rol":rid,"cada":cada,"texto":self.texto.value,"on":True,"count":0,"last_message":None,"delete_previous":False}
-        save(); await interaction.response.edit_message(embed=autopings_embed(interaction.guild.id),view=AutoPingsView())
+        key = str(uuid.uuid4())[:8]
+        cfg(interaction.guild.id)["autopings"]["items"][key] = {
+            "nombre": self.nombre.value[:80], "canal": self.canal_id, "rol": self.rol_id, "cada": cada,
+            "texto": self.texto.value, "on": True, "count": 0, "last_message": None, "delete_previous": True}
+        save()
+        await interaction.response.edit_message(embed=autopings_embed(interaction.guild.id), view=AutoPingsView(interaction.guild.id))
 
-class AutoPingDeleteModal(discord.ui.Modal,title="Eliminar mensaje automático"):
-    nombre=discord.ui.TextInput(label="ID del mensaje automático")
-    async def on_submit(self,interaction):
-        cfg(interaction.guild.id)["autopings"]["items"].pop(self.nombre.value.strip(),None); save()
-        await interaction.response.edit_message(embed=autopings_embed(interaction.guild.id),view=AutoPingsView())
 
-class AutoPingDeletePreviousModal(discord.ui.Modal, title="Borrar mensaje anterior"):
-    ident=discord.ui.TextInput(label="ID del mensaje automático",placeholder="Ej: a1b2c3d4")
-    async def on_submit(self,interaction):
-        item=cfg(interaction.guild.id)["autopings"]["items"].get(self.ident.value.strip())
+class AutoPingCrearView(AdminView):
+    def __init__(self):
+        super().__init__()
+        self.canal_id = None
+        self.rol_id = None
+
+    @discord.ui.select(cls=discord.ui.ChannelSelect, channel_types=[discord.ChannelType.text],
+                       placeholder="Canal donde se enviará el mensaje", row=0)
+    async def canal(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        self.canal_id = select.values[0].id
+        await interaction.response.edit_message(embed=autoping_crear_embed(self.canal_id, self.rol_id), view=self)
+
+    @discord.ui.select(cls=discord.ui.RoleSelect, min_values=1, max_values=1,
+                       placeholder="Rol que se agregará (al pulsar Desactivar)", row=1)
+    async def rol(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        self.rol_id = select.values[0].id
+        await interaction.response.edit_message(embed=autoping_crear_embed(self.canal_id, self.rol_id), view=self)
+
+    @discord.ui.button(label="Continuar ✏️", style=discord.ButtonStyle.success, row=2)
+    async def continuar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.canal_id or not self.rol_id:
+            return await interaction.response.send_message("⚠️ Elige primero el canal y el rol.", ephemeral=True)
+        rol = interaction.guild.get_role(self.rol_id)
+        if rol is None or rol.managed or rol.is_default() or interaction.guild.me.top_role <= rol:
+            return await interaction.response.send_message(
+                "❌ No puedo dar ese rol: debe estar **por debajo de mi rol** y no ser un rol especial.", ephemeral=True)
+        await interaction.response.send_modal(AutoPingModal(self.canal_id, self.rol_id))
+
+    @discord.ui.button(label="⬅ Cancelar", style=discord.ButtonStyle.secondary, row=2)
+    async def cancelar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=autopings_embed(interaction.guild.id), view=AutoPingsView(interaction.guild.id))
+
+
+class AutoPingSelect(discord.ui.Select):
+    """Menú para elegir un mensaje automático (sin tener que escribir su ID)."""
+    def __init__(self, gid: int, accion: str):
+        items = cfg(gid)["autopings"]["items"]
+        opciones = []
+        for key, it in list(items.items())[:25]:
+            if accion == "borrar":
+                desc = "Borrar anterior: " + ("Sí (pulsa para desactivar)" if it.get("delete_previous") else "No (pulsa para activar)")
+            else:
+                desc = f"Cada {it.get('cada', 2)} mensajes"
+            opciones.append(discord.SelectOption(label=str(it.get("nombre", key))[:100], value=key, description=desc[:100]))
+        super().__init__(
+            placeholder="🧹 Activar/desactivar «borrar mensaje anterior»" if accion == "borrar" else "🗑️ Eliminar un mensaje automático",
+            options=opciones, row=0 if accion == "borrar" else 1)
+        self.accion = accion
+
+    async def callback(self, interaction: discord.Interaction):
+        items = cfg(interaction.guild.id)["autopings"]["items"]
+        key = self.values[0]
+        item = items.get(key)
         if not item:
-            return await interaction.response.send_message("❌ No existe ese mensaje automático.",ephemeral=True)
-        item["delete_previous"]=not item.get("delete_previous",False); save()
-        estado="activado" if item["delete_previous"] else "desactivado"
-        await interaction.response.send_message(f"✅ Borrar el mensaje anterior: **{estado}**.",ephemeral=True)
+            return await interaction.response.send_message("❌ Ese mensaje automático ya no existe.", ephemeral=True)
+        if self.accion == "borrar":
+            item["delete_previous"] = not item.get("delete_previous", False)
+        else:
+            items.pop(key, None)
+        save()
+        await interaction.response.edit_message(embed=autopings_embed(interaction.guild.id), view=AutoPingsView(interaction.guild.id))
+
 
 class AutoPingsView(AdminView):
-    @discord.ui.button(label="➕ Crear mensaje",style=discord.ButtonStyle.primary,row=0)
-    async def crear(self,interaction,button): await interaction.response.send_modal(AutoPingModal())
-    @discord.ui.button(label="🗑️ Eliminar mensaje",style=discord.ButtonStyle.danger,row=0)
-    async def eliminar(self,interaction,button): await interaction.response.send_modal(AutoPingDeleteModal())
-    @discord.ui.button(label="🧹 Borrar mensaje anterior",style=discord.ButtonStyle.secondary,row=1)
-    async def borrar(self,interaction,button):
-        await interaction.response.send_modal(AutoPingDeletePreviousModal())
-    @discord.ui.button(label="🟢 Activar / 🔴 Desactivar",style=discord.ButtonStyle.success,row=1)
+    def __init__(self, gid: int):
+        super().__init__()
+        if cfg(gid)["autopings"]["items"]:
+            self.add_item(AutoPingSelect(gid, "borrar"))
+            self.add_item(AutoPingSelect(gid, "eliminar"))
+
+    @discord.ui.button(label="➕ Crear mensaje",style=discord.ButtonStyle.primary,row=2)
+    async def crear(self,interaction,button): await interaction.response.edit_message(embed=autoping_crear_embed(),view=AutoPingCrearView())
+    @discord.ui.button(label="🟢 Activar / 🔴 Desactivar",style=discord.ButtonStyle.success,row=2)
     async def toggle(self,interaction,button):
         cfg(interaction.guild.id)["autopings"]["on"]=not cfg(interaction.guild.id)["autopings"].get("on",False); save()
-        await interaction.response.edit_message(embed=autopings_embed(interaction.guild.id),view=AutoPingsView())
+        await interaction.response.edit_message(embed=autopings_embed(interaction.guild.id),view=AutoPingsView(interaction.guild.id))
     @discord.ui.button(label="⬅ Volver",style=discord.ButtonStyle.secondary,row=2)
     async def volver(self,interaction,button): await interaction.response.edit_message(embed=home_embed(),view=HomeView())
 
@@ -5344,7 +5416,7 @@ async def procesar_autopings(m):
         try:
             role=ch.guild.get_role(item.get("rol"))
             texto=item.get("texto","")
-            sent=await ch.send((role.mention if role else "")+"\n"+texto,view=AutoPingMessageView(key),allowed_mentions=discord.AllowedMentions(roles=True,users=False,everyone=False))
+            sent=await ch.send(texto,view=AutoPingMessageView(key),allowed_mentions=discord.AllowedMentions.none())
             item["last_message"]=sent.id; changed=True
         except discord.HTTPException: pass
     if changed: save()
