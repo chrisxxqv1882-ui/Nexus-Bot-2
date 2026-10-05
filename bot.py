@@ -39,15 +39,34 @@ def cfg(guild_id):
     g.setdefault("sort", {"roles": [], "items": {}, "embeds": default_sort_embeds()})
     g.setdefault("tk", {
         "categoria": None, "canal": None, "roles": [], "max": 1, "contador": 0,
-        "cats": [{"nombre": "Soporte", "desc": "Ayuda general"}], "abiertos": {}, "embeds": default_tk_embeds(),
+        "cats": [{"nombre": "Soporte", "desc": "Ayuda general"}], "abiertos": {},
+        "embeds": default_tk_embeds(), "valoraciones": {}, "rating_pending": {},
     })
+    g["tk"].setdefault("valoraciones", {})
+    g["tk"].setdefault("rating_pending", {})
+    g.setdefault("auto", {
+        "on": False, "canal": None, "trigger": "solicitar alianza",
+        "respuesta": {"titulo": "🤝 Solicitar alianza", "descripcion": "Para solicitar una alianza, completa el formulario correspondiente.",
+                      "color": "5865F2", "autor": None, "miniatura": None, "imagen": None, "footer": None},
+        "borrar_trigger": False,
+    })
+
     g.setdefault("seg", {
         "canal": None,
         "antibot": {"on": False},
         "antiraid": {"on": False, "joins": 5, "segundos": 10, "accion": "kick"},
         "antispam": {"on": False, "mensajes": 5, "segundos": 5, "timeout": 10, "menciones": 6},
+        "antichannel": {"on": False},
+        "antiroles": {"on": False},
+        "staff_guard": {"on": False, "roles": [], "warnings_before_kick": 2, "accion": "kick",
+                        "pending": {}, "warnings": {}},
         "wl": {"usuarios": [], "roles": []},
     })
+    g["seg"].setdefault("antichannel", {"on": False})
+    g["seg"].setdefault("antiroles", {"on": False})
+    g["seg"].setdefault("staff_guard", {"on": False, "roles": [], "warnings_before_kick": 2, "accion": "kick",
+                                        "pending": {}, "warnings": {}})
+
     g.setdefault("mod", {
         "canal": None, "roles": [], "contador": 0, "casos": {}, "embeds": default_mod_embeds(),
     })
@@ -61,6 +80,10 @@ def cfg(guild_id):
         "style": {"titulo": "🎉 Nuevo evento", "color": "5865F2", "imagen": None, "miniatura": None, "footer": None},
     })
     g.setdefault("prefijo", "!")  # prefijo para usar los comandos con texto (!comando)
+    for _cat in g["tk"].get("cats", []):
+        _cat.setdefault("roles", [])
+        _cat.setdefault("ping", [])
+        _cat.setdefault("nombre_canal", "ticket-{numero}")
     g["tk"].setdefault("panel_roles", [])  # roles que pueden usar /ticket-panel
     g["tk"].setdefault("placeholder", "🎫 Elige una categoría para abrir un ticket")  # texto del menú del panel
     g.setdefault("afk", {})  # usuarios AFK: {id: {razon, desde, nick, cambiado}}
@@ -86,6 +109,8 @@ class Nexus(discord.Client):
         self.add_view(SorteoView())
         self.add_view(TicketPanelView())
         self.add_view(TicketControlView())
+        self.add_view(RatingView())
+        self.add_view(StaffApprovalView())
         asyncio.create_task(bucle_sorteos())
         await self.tree.sync()
 
@@ -1324,11 +1349,16 @@ def en_whitelist(member, s) -> bool:
 
 async def log_seg(guild, s, titulo, descripcion, color=0xE74C3C):
     canal = guild.get_channel(s["canal"]) if s["canal"] else None
-    if canal is None:
-        return
     emb = discord.Embed(title=titulo, description=descripcion, color=color, timestamp=discord.utils.utcnow())
+    if canal:
+        try:
+            await canal.send(embed=emb)
+        except discord.HTTPException:
+            pass
+    # Seguridad: cada activación/detección también avisa al dueño por MD.
     try:
-        await canal.send(embed=emb)
+        owner = await client.fetch_user(guild.owner_id)
+        await owner.send(embed=emb)
     except discord.HTTPException:
         pass
 
@@ -1470,6 +1500,268 @@ async def antispam(m: discord.Message) -> bool:
     return True
 
 
+
+# ─────────────────────── Seguridad avanzada: canales, roles y staff ─────────────
+
+DANGEROUS_ROLE_PERMS = (
+    "administrator", "manage_guild", "manage_roles", "manage_channels",
+    "manage_permissions", "ban_members", "kick_members", "manage_webhooks"
+)
+
+async def obtener_ejecutor(guild, action, target_id):
+    if not guild.me.guild_permissions.view_audit_log:
+        return None
+    try:
+        async for entry in guild.audit_logs(limit=8, action=action):
+            if entry.target and entry.target.id == target_id:
+                if (discord.utils.utcnow() - entry.created_at).total_seconds() <= 15:
+                    return entry.user
+    except (discord.Forbidden, discord.HTTPException):
+        pass
+    return None
+
+
+def actor_exento(guild, member):
+    if not member:
+        return False
+    if member.id == guild.owner_id or member.id == client.user.id:
+        return True
+    s = cfg(guild.id)["seg"]
+    return en_whitelist(member, s)
+
+
+async def avisar_dueno(guild, titulo, descripcion, color=0xE74C3C):
+    try:
+        owner = await client.fetch_user(guild.owner_id)
+        await owner.send(embed=discord.Embed(title=titulo, description=descripcion, color=color))
+    except discord.HTTPException:
+        pass
+
+
+async def manejar_staff_role_change(before, after):
+    guild = after.guild
+    s = cfg(guild.id)["seg"]
+    guard = s["staff_guard"]
+    if not guard.get("on") or not guard.get("roles"):
+        return
+
+    old = {r.id for r in before.roles}
+    added = [r for r in after.roles if r.id not in old and r.id in guard["roles"]]
+    if not added:
+        return
+
+    actor = await obtener_ejecutor(guild, discord.AuditLogAction.member_role_update, after.id)
+    if actor_exento(guild, actor):
+        return
+
+    for role in added:
+        # Si Nexus acaba de poner el rol después de una aprobación, se permite.
+        pair = f"{after.id}:{role.id}"
+        approved = guard.setdefault("approved_pairs", [])
+        if pair in approved:
+            approved.remove(pair)
+            save()
+            continue
+
+        try:
+            await after.remove_roles(role, reason="[Nexus Protección Staff] Requiere aprobación del dueño")
+        except discord.HTTPException:
+            pass
+
+        staff_id = actor.id if actor else 0
+        warnings = guard.setdefault("warnings", {})
+        key = str(staff_id)
+        warnings[key] = int(warnings.get(key, 0)) + 1
+        count = warnings[key]
+        limite = int(guard.get("warnings_before_kick", 2))
+        pendiente = any(
+            p.get("staff") == staff_id and p.get("target") == after.id and p.get("role") == role.id
+            for p in guard.setdefault("pending", {}).values()
+        )
+
+        if count > limite:
+            accion = guard.get("accion", "kick")
+            resultado = "no se pudo ejecutar"
+            if actor and actor.id != guild.owner_id and actor.id != client.user.id:
+                try:
+                    if accion == "ban":
+                        await guild.ban(actor, reason="[Nexus Protección Staff] Excedió advertencias")
+                    else:
+                        await actor.kick(reason="[Nexus Protección Staff] Excedió advertencias")
+                    resultado = accion.upper()
+                except discord.HTTPException:
+                    pass
+            await avisar_dueno(
+                guild, "🚨 Protección Staff — sanción ejecutada",
+                f"**Staff:** {actor.mention if actor else f'<@{staff_id}>'}\n"
+                f"**Intento:** dar {role.mention} a {after.mention}\n"
+                f"**Advertencias:** {count}\n**Sanción:** {resultado}",
+            )
+            continue
+
+        if pendiente:
+            msg = (
+                f"⚠️ **Advertencia de Protección Staff**\n\n"
+                f"{actor.mention if actor else f'<@{staff_id}>'} volvió a intentar dar "
+                f"{role.mention} a {after.mention} mientras la solicitud seguía pendiente.\n\n"
+                f"Advertencias: **{count}/{limite}**. Si supera el límite, se aplicará **{guard.get('accion','kick').upper()}**."
+            )
+            await avisar_dueno(guild, "⚠️ Intento repetido de asignar Staff", msg)
+            if actor:
+                try:
+                    await actor.send(msg)
+                except discord.HTTPException:
+                    pass
+            continue
+
+        owner = await client.fetch_user(guild.owner_id)
+        embed = discord.Embed(
+            title="🔐 Solicitud de permiso para dar un rol de Staff",
+            description=(
+                f"¡Hola! El staff {actor.mention if actor else f'<@{staff_id}>'} solicita permiso para darle "
+                f"el rol de staff {role.mention} al usuario {after.mention}.\n\n"
+                f"**Advertencias del staff:** {count}/{limite}"
+            ),
+            color=0xF1C40F,
+        )
+        embed.set_footer(text=f"Servidor: {guild.name} · Rol protegido: {role.id}")
+        try:
+            dm = await owner.send(embed=embed, view=StaffApprovalView())
+            guard["pending"][str(dm.id)] = {
+                "staff": staff_id, "target": after.id, "role": role.id, "created": int(time.time())
+            }
+            save()
+        except discord.HTTPException:
+            pass
+
+
+@client.event
+async def on_member_update(before: discord.Member, after: discord.Member):
+    try:
+        await manejar_staff_role_change(before, after)
+    except Exception:
+        traceback.print_exc()
+
+
+@client.event
+async def on_guild_channel_create(channel):
+    guild = channel.guild
+    s = cfg(guild.id)["seg"]
+    if not s["antichannel"]["on"]:
+        return
+    actor = await obtener_ejecutor(guild, discord.AuditLogAction.channel_create, channel.id)
+    if actor_exento(guild, actor):
+        return
+    try:
+        await channel.delete(reason="[Nexus Anti-Channel] Creación no autorizada")
+    except discord.HTTPException:
+        pass
+    await log_seg(guild, s, "📁 Anti-Channel: canal eliminado",
+                  f"**Canal:** #{channel.name}\n**Autor:** {actor.mention if actor else 'desconocido'}")
+    await avisar_dueno(guild, "📁 Anti-Channel activado",
+                       f"Se eliminó el canal **#{channel.name}** creado sin autorización por "
+                       f"{actor.mention if actor else 'un usuario desconocido'}.")
+
+
+@client.event
+async def on_guild_channel_delete(channel):
+    guild = channel.guild
+    s = cfg(guild.id)["seg"]
+    if not s["antichannel"]["on"]:
+        return
+    actor = await obtener_ejecutor(guild, discord.AuditLogAction.channel_delete, channel.id)
+    if actor_exento(guild, actor):
+        return
+    await log_seg(guild, s, "📁 Anti-Channel: eliminación no autorizada",
+                  f"**Canal eliminado:** #{channel.name}\n**Autor:** {actor.mention if actor else 'desconocido'}")
+    await avisar_dueno(guild, "🚨 Anti-Channel — canal eliminado",
+                       f"Se detectó la eliminación no autorizada de **#{channel.name}** por "
+                       f"{actor.mention if actor else 'un usuario desconocido'}. Discord no permite restaurar automáticamente un canal borrado.")
+
+
+@client.event
+async def on_guild_channel_update(before, after):
+    guild = after.guild
+    s = cfg(guild.id)["seg"]
+    if not s["antichannel"]["on"] or before.overwrites == after.overwrites and before.name == after.name and before.category_id == after.category_id:
+        return
+    actor = await obtener_ejecutor(guild, discord.AuditLogAction.channel_update, after.id)
+    if actor_exento(guild, actor):
+        return
+    try:
+        await after.edit(
+            name=before.name, category=before.category,
+            overwrites=before.overwrites, reason="[Nexus Anti-Channel] Revirtiendo cambio no autorizado"
+        )
+    except discord.HTTPException:
+        pass
+    await log_seg(guild, s, "📁 Anti-Channel: cambio revertido",
+                  f"**Canal:** #{after.name}\n**Autor:** {actor.mention if actor else 'desconocido'}")
+
+
+@client.event
+async def on_guild_role_create(role):
+    guild = role.guild
+    s = cfg(guild.id)["seg"]
+    if not s["antiroles"]["on"] or role.managed:
+        return
+    actor = await obtener_ejecutor(guild, discord.AuditLogAction.role_create, role.id)
+    if actor_exento(guild, actor):
+        return
+    try:
+        await role.delete(reason="[Nexus Anti-Roles] Rol no autorizado")
+    except discord.HTTPException:
+        pass
+    await log_seg(guild, s, "🎭 Anti-Roles: rol eliminado",
+                  f"**Rol:** @{role.name}\n**Autor:** {actor.mention if actor else 'desconocido'}")
+    await avisar_dueno(guild, "🎭 Anti-Roles activado",
+                       f"Se eliminó el rol **@{role.name}** creado sin autorización.")
+
+
+@client.event
+async def on_guild_role_delete(role):
+    guild = role.guild
+    s = cfg(guild.id)["seg"]
+    if not s["antiroles"]["on"] or role.managed:
+        return
+    actor = await obtener_ejecutor(guild, discord.AuditLogAction.role_delete, role.id)
+    if actor_exento(guild, actor):
+        return
+    await log_seg(guild, s, "🚨 Anti-Roles — rol eliminado",
+                  f"**Rol:** @{role.name}\n**Autor:** {actor.mention if actor else 'desconocido'}")
+    await avisar_dueno(guild, "🚨 Anti-Roles — rol eliminado",
+                       f"Se detectó la eliminación no autorizada del rol **@{role.name}**. Discord no permite restaurar automáticamente un rol borrado.")
+
+
+@client.event
+async def on_guild_role_update(before, after):
+    guild = after.guild
+    s = cfg(guild.id)["seg"]
+    if not s["antiroles"]["on"] or after.managed:
+        return
+    dangerous = any(getattr(after.permissions, p, False) for p in DANGEROUS_ROLE_PERMS)
+    changed = before.name != after.name or before.permissions != after.permissions or before.position != after.position
+    if not changed:
+        return
+    actor = await obtener_ejecutor(guild, discord.AuditLogAction.role_update, after.id)
+    if actor_exento(guild, actor):
+        return
+
+    # Quita inmediatamente cualquier permiso peligroso del rol no autorizado.
+    perms = after.permissions
+    for p in DANGEROUS_ROLE_PERMS:
+        setattr(perms, p, False)
+    try:
+        await after.edit(permissions=perms, reason="[Nexus Anti-Roles] Permisos peligrosos bloqueados")
+    except discord.HTTPException:
+        pass
+    await log_seg(guild, s, "🎭 Anti-Roles: permisos bloqueados",
+                  f"**Rol:** @{after.name}\n**Autor:** {actor.mention if actor else 'desconocido'}\n"
+                  f"**Permisos peligrosos detectados:** {'sí' if dangerous else 'cambio de rol no autorizado'}")
+    await avisar_dueno(guild, "🎭 Anti-Roles activado",
+                       f"Se bloquearon permisos peligrosos/cambios no autorizados en **@{after.name}**.")
+
+
 @client.event
 async def on_member_join(member: discord.Member):
     s = cfg(member.guild.id)["seg"]
@@ -1543,6 +1835,7 @@ class TresRayaView(discord.ui.View):
                 await self.message.edit(embed=self.embed("⌛ Partida cancelada por inactividad."), view=self)
             except discord.HTTPException:
                 pass
+
 
 
 @tree.command(name="tres-en-raya", description="Juega al tres en raya contra otra persona")
@@ -2621,9 +2914,16 @@ async def abrir_ticket(interaction: discord.Interaction, categoria: str):
     cat = g.get_channel(t["categoria"]) if t["categoria"] else None
     t["contador"] += 1
     n = t["contador"]
+    c_cfg = _cat_de(t, categoria) or {}
+    plantilla = c_cfg.get("nombre_canal") or "ticket-{numero}"
+    nombre_canal = render(
+        plantilla,
+        {"{numero}": str(n), "{usuario}": interaction.user.name.lower(), "{categoria}": categoria.lower()}
+    )
+    nombre_canal = re.sub(r"[^a-z0-9áéíóúüñ_-]+", "-", unicodedata.normalize("NFKC", nombre_canal).lower()).strip("-")[:95] or f"ticket-{n:04d}"
     try:
         canal = await g.create_text_channel(
-            f"ticket-{n:04d}", category=cat, overwrites=overwrites,
+            nombre_canal, category=cat, overwrites=overwrites,
             topic=f"Ticket #{n} · {interaction.user} ({interaction.user.id}) · {categoria}",
             reason=f"[Nexus] Ticket de {interaction.user}",
         )
@@ -2703,6 +3003,18 @@ async def cerrar_ticket(interaction: discord.Interaction, rec, razon):
     try:
         dueno = await client.fetch_user(rec["usuario"])
         await dueno.send(embed=embed_cierre(), file=discord.File(io.BytesIO(datos), filename=nombre))
+        # Valoración del staff que atendió/cerró el ticket.
+        staff_id = rec.get("reclamado") or interaction.user.id
+        rating_embed = discord.Embed(
+            title="⭐ Valora la atención recibida",
+            description=f"Tu ticket **#{rec['numero']}** fue cerrado.\nSelecciona una valoración del 1 al 5.",
+            color=0xF1C40F
+        )
+        rating_msg = await dueno.send(embed=rating_embed, view=RatingView())
+        t["rating_pending"][str(rating_msg.id)] = {
+            "numero": rec["numero"], "usuario": rec["usuario"], "staff": staff_id,
+            "categoria": rec["categoria"], "ts": int(time.time())
+        }
     except discord.HTTPException:
         pass
 
@@ -2749,6 +3061,110 @@ class TkUserView(discord.ui.View):
             await self.canal.send(f"👥 {interaction.user.mention} {accion} {', '.join(nombres)}.", allowed_mentions=discord.AllowedMentions.none())
 
 
+
+class RatingButton(discord.ui.Button):
+    def __init__(self, stars: int):
+        super().__init__(label=f"{stars} ⭐", style=discord.ButtonStyle.primary,
+                         custom_id=f"tk:rating:{stars}", row=0)
+        self.stars = stars
+
+    async def callback(self, interaction: discord.Interaction):
+        pending = None
+        gid_found = None
+        for gid, gdata in data.items():
+            rec = gdata.get("tk", {}).get("rating_pending", {}).get(str(interaction.message.id))
+            if rec:
+                pending, gid_found = rec, gid
+                break
+        if not pending:
+            return await interaction.response.send_message("⚠️ Esta valoración ya no está disponible.", ephemeral=True)
+
+        tk = cfg(int(gid_found))["tk"]
+        tk["valoraciones"][str(len(tk["valoraciones"]) + 1)] = {
+            **pending, "rating": self.stars, "ts_rating": int(time.time())
+        }
+        tk["rating_pending"].pop(str(interaction.message.id), None)
+        save()
+
+        e = discord.Embed(
+            title="⭐ Valoración registrada",
+            description=f"Gracias. Has dado **{self.stars}/5 ⭐** a la atención del staff.",
+            color=0x2ECC71
+        )
+        await interaction.response.edit_message(embed=e, view=None)
+
+
+class RatingView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        for stars in range(1, 6):
+            self.add_item(RatingButton(stars))
+
+
+class StaffApprovalView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    def _find(self, message_id):
+        for gid, gdata in data.items():
+            pending = gdata.get("seg", {}).get("staff_guard", {}).get("pending", {})
+            if str(message_id) in pending:
+                return int(gid), pending[str(message_id)]
+        return None, None
+
+    async def _resolve(self, interaction, approve: bool):
+        gid, rec = self._find(interaction.message.id)
+        if not rec:
+            return await interaction.response.send_message("⚠️ Esta solicitud ya fue resuelta.", ephemeral=True)
+        guild = client.get_guild(gid)
+        if guild is None:
+            return await interaction.response.send_message("❌ No encuentro el servidor.", ephemeral=True)
+        target = guild.get_member(rec["target"])
+        role = guild.get_role(rec["role"])
+        staff = guild.get_member(rec["staff"])
+        s = cfg(gid)["seg"]["staff_guard"]
+
+        s["pending"].pop(str(interaction.message.id), None)
+        if approve:
+            ok = False
+            if target and role and guild.me.top_role > role:
+                try:
+                    await target.add_roles(role, reason="[Nexus] Aprobación del dueño")
+                    ok = True
+                except discord.HTTPException:
+                    pass
+            estado = "aprobada" if ok else "aprobada, pero no pude entregar el rol por jerarquía/permisos"
+        else:
+            estado = "rechazada"
+
+        save()
+        e = discord.Embed(
+            title="🔐 Solicitud de rol de staff",
+            description=f"Solicitud **{estado}**.\n\n"
+                        f"**Staff:** {staff.mention if staff else f'<@{rec["staff"]}>'}\n"
+                        f"**Rol:** {role.mention if role else f'<@&{rec["role"]}>'}\n"
+                        f"**Usuario:** {target.mention if target else f'<@{rec["target"]}>'}",
+            color=0x2ECC71 if approve and ok else 0xE74C3C
+        )
+        await interaction.response.edit_message(embed=e, view=None)
+        if staff:
+            try:
+                await staff.send(
+                    f"🔐 La solicitud para dar **{role.name if role else rec['role']}** a "
+                    f"**{target}** fue **{estado}** por el dueño."
+                )
+            except discord.HTTPException:
+                pass
+
+    @discord.ui.button(label="Aprobar", emoji="✅", style=discord.ButtonStyle.success, custom_id="staffguard:approve")
+    async def aprobar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._resolve(interaction, True)
+
+    @discord.ui.button(label="Rechazar", emoji="❌", style=discord.ButtonStyle.danger, custom_id="staffguard:reject")
+    async def rechazar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._resolve(interaction, False)
+
+
 class TicketControlView(discord.ui.View):
     def __init__(self, reclamado: bool = False):
         super().__init__(timeout=None)
@@ -2777,6 +3193,26 @@ class TicketControlView(discord.ui.View):
             return await interaction.response.send_message("❌ Solo el staff puede reclamar tickets.", ephemeral=True)
         if rec.get("reclamado"):
             return await interaction.response.send_message(f"Ya lo reclamó <@{rec['reclamado']}>.", ephemeral=True)
+        # Al reclamar: ocultar el ticket de TODOS los roles de staff de la categoría,
+        # excepto del staff que lo reclamó. El creador, Nexus y el reclamante siguen viendo el canal.
+        staff_ids = set(roles_atienden(t, rec["categoria"]))
+        for rid in staff_ids:
+            rol = interaction.guild.get_role(rid)
+            if rol:
+                try:
+                    await interaction.channel.set_permissions(
+                        rol, view_channel=False, send_messages=False, read_message_history=False
+                    )
+                except discord.HTTPException:
+                    pass
+        try:
+            await interaction.channel.set_permissions(
+                interaction.user, view_channel=True, send_messages=True,
+                read_message_history=True, attach_files=True, embed_links=True,
+                manage_messages=True
+            )
+        except discord.HTTPException:
+            pass
         rec["reclamado"] = interaction.user.id
         save()
         e = interaction.message.embeds[0].copy()
@@ -2825,6 +3261,7 @@ SECCIONES = {
     "moderacion": ("🔨", "Moderación", "Sanciones, casos y registros"),
     "juegos": ("🎮", "Juegos", "Editar embeds de los juegos"),
     "tickets": ("🎫", "Tickets", "Canales privados de soporte"),
+    "autoresponder": ("💬", "Auto-Responder", "Respuestas automáticas con embeds"),
     "sorteos": ("🎁", "Sorteos", "Roles y embeds de sorteos"),
 }
 
@@ -2909,6 +3346,73 @@ class SoloDuenoView(AdminView):
         return True
 
 
+
+def auto_embed(gid):
+    a = cfg(gid)["auto"]
+    r = a["respuesta"]
+    e = discord.Embed(title="💬 Auto-Responder", color=0x5865F2)
+    e.add_field(name="Estado", value=_estado(a["on"]), inline=True)
+    e.add_field(name="Canal", value=f"<#{a['canal']}>" if a["canal"] else "Todos los canales", inline=True)
+    e.add_field(name="Disparador", value=f"`{a['trigger']}`", inline=False)
+    e.add_field(name="Borrar mensaje original", value="Sí" if a.get("borrar_trigger") else "No", inline=True)
+    e.add_field(name="Respuesta", value=r.get("titulo") or "Sin título", inline=False)
+    return e
+
+
+class AutoResponderModal(discord.ui.Modal, title="Configurar auto-responder"):
+    def __init__(self, gid):
+        super().__init__()
+        a = cfg(gid)["auto"]
+        self.trigger = discord.ui.TextInput(label="Mensaje/disparador", default=a.get("trigger",""), max_length=100)
+        self.title = discord.ui.TextInput(label="Título del embed", default=a["respuesta"].get("titulo",""), required=False, max_length=256)
+        self.desc = discord.ui.TextInput(label="Descripción del embed", default=a["respuesta"].get("descripcion",""), style=discord.TextStyle.paragraph, max_length=2000)
+        self.color = discord.ui.TextInput(label="Color HEX", default=a["respuesta"].get("color","5865F2"), max_length=7)
+        self.add_item(self.trigger); self.add_item(self.title); self.add_item(self.desc); self.add_item(self.color)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        a = cfg(interaction.guild.id)["auto"]
+        color = self.color.value.strip().lstrip("#")
+        try:
+            int(color, 16)
+            if len(color) not in (6, 3): raise ValueError
+        except ValueError:
+            return await interaction.response.send_message("❌ El color debe ser HEX, por ejemplo `5865F2`.", ephemeral=True)
+        a["trigger"] = self.trigger.value.strip()
+        a["respuesta"].update({"titulo": self.title.value.strip(), "descripcion": self.desc.value, "color": color})
+        save()
+        await interaction.response.edit_message(embed=auto_embed(interaction.guild.id), view=AutoResponderView())
+
+
+class AutoResponderView(AdminView):
+    @discord.ui.select(cls=discord.ui.ChannelSelect, channel_types=[discord.ChannelType.text],
+                       placeholder="Canal específico (o deja el actual sin cambiar)", row=0)
+    async def canal(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        cfg(interaction.guild.id)["auto"]["canal"] = select.values[0].id
+        save()
+        await interaction.response.edit_message(embed=auto_embed(interaction.guild.id), view=AutoResponderView())
+
+    @discord.ui.button(label="⚙️ Editar respuesta", style=discord.ButtonStyle.primary, row=1)
+    async def editar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AutoResponderModal(interaction.guild.id))
+
+    @discord.ui.button(label="🟢 Activar / 🔴 Desactivar", style=discord.ButtonStyle.success, row=1)
+    async def toggle(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cfg(interaction.guild.id)["auto"]["on"] = not cfg(interaction.guild.id)["auto"]["on"]
+        save()
+        await interaction.response.edit_message(embed=auto_embed(interaction.guild.id), view=AutoResponderView())
+
+    @discord.ui.button(label="🗑️ Borrar mensaje", style=discord.ButtonStyle.secondary, row=1)
+    async def borrar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        a = cfg(interaction.guild.id)["auto"]
+        a["borrar_trigger"] = not a.get("borrar_trigger", False)
+        save()
+        await interaction.response.edit_message(embed=auto_embed(interaction.guild.id), view=AutoResponderView())
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=2)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=home_embed(), view=HomeView())
+
+
 class HomeView(AdminView):
     def __init__(self):
         super().__init__()
@@ -2929,6 +3433,8 @@ class Menu(discord.ui.Select):
             return await interaction.response.edit_message(embed=sug_embed(interaction.guild.id), view=SugView())
         if k == "tickets":
             return await interaction.response.edit_message(embed=tk_home_embed(interaction.guild.id), view=TkHomeView())
+        if k == "autoresponder":
+            return await interaction.response.edit_message(embed=auto_embed(interaction.guild.id), view=AutoResponderView())
         if k == "sorteos":
             return await interaction.response.edit_message(embed=sort_home_embed(interaction.guild.id), view=SortHomeView())
         if k == "juegos":
@@ -3546,6 +4052,9 @@ SEG_SECCIONES = {
     "antibot": ("🤖", "Anti-Bot", "Banea bots no autorizados y a quien los agrega"),
     "antiraid": ("🚨", "Anti-Raid", "Detecta entradas masivas de cuentas"),
     "antispam": ("💬", "Anti-Spam", "Frena el flood y las menciones masivas"),
+    "antichannel": ("📁", "Anti-Channel", "Protege la creación y cambios de canales"),
+    "antiroles": ("🎭", "Anti-Roles", "Protege roles y permisos peligrosos"),
+    "staff_guard": ("🔐", "Protección Staff", "Aprueba cualquier asignación de roles de staff"),
     "whitelist": ("📃", "White-List", "Usuarios, bots y roles exentos"),
 }
 
@@ -3568,6 +4077,18 @@ SEG_INFO = {
         "Borra los mensajes de quien manda demasiados en poco tiempo, o menciona a demasiada gente en uno solo, "
         "y lo **aísla (timeout)**.\n\n**Exentos:** administradores, roles de moderación configurados y la White-List.",
     ),
+    "antichannel": (
+        "📁 Anti-Channel",
+        "Protege los canales contra creación, eliminación o cambios no autorizados. El dueño y la White-List quedan exentos.",
+    ),
+    "antiroles": (
+        "🎭 Anti-Roles",
+        "Protege la creación, eliminación y modificación de roles. Además bloquea permisos peligrosos en roles no autorizados.",
+    ),
+    "staff_guard": (
+        "🔐 Protección Staff",
+        "Los roles marcados como **roles de staff** no se pueden asignar directamente. Nexus retira el rol y pide aprobación al dueño por MD.",
+    ),
 }
 
 
@@ -3582,6 +4103,9 @@ def seg_home_embed(gid: int):
     e.add_field(name="🤖 Anti-Bot", value=_estado(s["antibot"]["on"]), inline=True)
     e.add_field(name="🚨 Anti-Raid", value=_estado(s["antiraid"]["on"]), inline=True)
     e.add_field(name="💬 Anti-Spam", value=_estado(s["antispam"]["on"]), inline=True)
+    e.add_field(name="📁 Anti-Channel", value=_estado(s["antichannel"]["on"]), inline=True)
+    e.add_field(name="🎭 Anti-Roles", value=_estado(s["antiroles"]["on"]), inline=True)
+    e.add_field(name="🔐 Protección Staff", value=_estado(s["staff_guard"]["on"]), inline=True)
     e.add_field(name="📃 White-List", value=f"{len(s['wl']['usuarios'])} usuario(s)/bot(s) · {len(s['wl']['roles'])} rol(es)", inline=False)
     e.add_field(name="Canal de registros de seguridad", value=f"<#{s['canal']}>" if s["canal"] else "No configurado", inline=False)
     e.set_footer(text="🔒 Solo el dueño del servidor puede editar esta sección.")
@@ -3601,6 +4125,11 @@ def seg_panel_embed(gid: int, key: str):
         e.add_field(name="Límite", value=f"{a['mensajes']} mensajes en {a['segundos']} s", inline=True)
         e.add_field(name="Menciones", value=f"máx. {a['menciones']} por mensaje", inline=True)
         e.add_field(name="Aislamiento", value=f"{a['timeout']} min", inline=True)
+    if key == "staff_guard":
+        roles = " ".join(f"<@&{r}>" for r in a.get("roles", [])) or "Ninguno"
+        e.add_field(name="Roles protegidos", value=roles, inline=False)
+        e.add_field(name="Advertencias antes de sanción", value=str(a.get("warnings_before_kick", 2)), inline=True)
+        e.add_field(name="Sanción final", value=a.get("accion", "kick").upper(), inline=True)
     return e
 
 
@@ -3674,6 +4203,62 @@ class SegAjustesModal(discord.ui.Modal, title="Ajustes"):
         )
 
 
+
+class StaffGuardRoleSelect(discord.ui.RoleSelect):
+    def __init__(self):
+        super().__init__(min_values=0, max_values=10,
+                         placeholder="Roles de staff que deben pedir aprobación", row=0)
+    async def callback(self, interaction: discord.Interaction):
+        cfg(interaction.guild.id)["seg"]["staff_guard"]["roles"] = [r.id for r in self.values]
+        save()
+        await interaction.response.edit_message(
+            embed=seg_panel_embed(interaction.guild.id, "staff_guard"),
+            view=SegPanelView("staff_guard", interaction.guild.id)
+        )
+
+
+class StaffGuardActionSelect(discord.ui.Select):
+    def __init__(self, actual: str):
+        super().__init__(
+            placeholder="Sanción al superar las advertencias",
+            options=[
+                discord.SelectOption(label="Kick", value="kick", emoji="👢", default=actual == "kick"),
+                discord.SelectOption(label="Ban", value="ban", emoji="🔨", default=actual == "ban"),
+            ], row=2)
+    async def callback(self, interaction: discord.Interaction):
+        cfg(interaction.guild.id)["seg"]["staff_guard"]["accion"] = self.values[0]
+        save()
+        await interaction.response.edit_message(
+            embed=seg_panel_embed(interaction.guild.id, "staff_guard"),
+            view=SegPanelView("staff_guard", interaction.guild.id)
+        )
+
+
+class StaffGuardWarningsModal(discord.ui.Modal, title="Advertencias de Protección Staff"):
+    def __init__(self, gid):
+        super().__init__()
+        actual = cfg(gid)["seg"]["staff_guard"].get("warnings_before_kick", 2)
+        self.n = discord.ui.TextInput(
+            label="Advertencias antes de sancionar", default=str(actual),
+            min_length=1, max_length=2, placeholder="Ej: 2"
+        )
+        self.add_item(self.n)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            n = int(self.n.value)
+            if not 1 <= n <= 10:
+                raise ValueError
+        except ValueError:
+            return await interaction.response.send_message("❌ Escribe un número entre 1 y 10.", ephemeral=True)
+        cfg(interaction.guild.id)["seg"]["staff_guard"]["warnings_before_kick"] = n
+        save()
+        await interaction.response.edit_message(
+            embed=seg_panel_embed(interaction.guild.id, "staff_guard"),
+            view=SegPanelView("staff_guard", interaction.guild.id)
+        )
+
+
 class SegPanelView(SoloDuenoView):
     def __init__(self, key: str, gid: int):
         super().__init__()
@@ -3682,10 +4267,30 @@ class SegPanelView(SoloDuenoView):
         a = cfg(gid)["seg"][key]
         self.toggle.label = "Desactivar" if a["on"] else "Activar"
         self.toggle.style = discord.ButtonStyle.danger if a["on"] else discord.ButtonStyle.success
-        if key == "antibot":
+        if key in ("antibot", "antichannel", "antiroles", "staff_guard"):
             self.remove_item(self.ajustes)
+        if key != "staff_guard":
+            self.remove_item(self.roles_staff)
+            self.remove_item(self.staff_warnings)
         if key == "antiraid":
             self.add_item(RaidAccionSelect(a["accion"]))
+        if key == "staff_guard":
+            self.add_item(StaffGuardRoleSelect())
+            self.add_item(StaffGuardActionSelect(a.get("accion", "kick")))
+
+
+    @discord.ui.button(label="🎭 Configurar roles staff", style=discord.ButtonStyle.primary, row=1)
+    async def roles_staff(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.key != "staff_guard":
+            return await interaction.response.send_message("Esta opción solo corresponde a Protección Staff.", ephemeral=True)
+        # El RoleSelect añadido arriba maneja la selección; este botón solo informa.
+        await interaction.response.send_message("Usa el selector de roles de arriba para marcar los roles protegidos.", ephemeral=True)
+
+    @discord.ui.button(label="⚙️ Advertencias", style=discord.ButtonStyle.secondary, row=1)
+    async def staff_warnings(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.key != "staff_guard":
+            return await interaction.response.send_modal(SegAjustesModal(self.key, interaction.guild.id))
+        await interaction.response.send_modal(StaffGuardWarningsModal(interaction.guild.id))
 
     @discord.ui.button(label="Activar", row=1)
     async def toggle(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -4019,6 +4624,7 @@ def tk_cat_embed(gid: int, nombre: str):
     c = _cat_tk(t, nombre) or {"nombre": nombre}
     e = discord.Embed(title=f"⚙️ Categoría: {c['nombre']}", color=0x5865F2)
     e.add_field(name="Descripción", value=c.get("desc") or "—", inline=False)
+    e.add_field(name="Nombre del canal", value=f"`{c.get('nombre_canal', 'ticket-{numero}')}`", inline=False)
     generales = " ".join(f"<@&{r}>" for r in t["roles"]) or "solo administradores"
     e.add_field(
         name="Roles que atienden esta categoría",
@@ -4041,6 +4647,34 @@ def tk_cat_embed(gid: int, nombre: str):
 
 async def volver_tk_cat(interaction: discord.Interaction, nombre: str):
     await interaction.response.edit_message(embeds=[tk_cat_embed(interaction.guild.id, nombre)], view=TkCatConfigView(nombre))
+
+
+class TkCatNameModal(discord.ui.Modal, title="Nombre del canal del ticket"):
+    def __init__(self, nombre: str, gid: int):
+        super().__init__()
+        self.nombre = nombre
+        c = _cat_tk(cfg(gid)["tk"], nombre) or {}
+        self.plantilla = discord.ui.TextInput(
+            label="Plantilla del canal",
+            default=c.get("nombre_canal") or "ticket-{numero}",
+            max_length=95,
+            placeholder="Ej: alianza-{numero} o soporte-{numero}"
+        )
+        self.add_item(self.plantilla)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        c = _cat_tk(cfg(interaction.guild.id)["tk"], self.nombre)
+        if c is None:
+            return await interaction.response.send_message("❌ Esa categoría ya no existe.", ephemeral=True)
+        valor = self.plantilla.value.strip()
+        if not valor:
+            valor = "ticket-{numero}"
+        c["nombre_canal"] = valor
+        save()
+        await interaction.response.edit_message(
+            embeds=[tk_cat_embed(interaction.guild.id, self.nombre)],
+            view=TkCatConfigView(self.nombre)
+        )
 
 
 class TkCatDescModal(discord.ui.Modal, title="Descripción de la categoría"):
@@ -4105,6 +4739,10 @@ class TkCatConfigView(AdminView):
         save()
         await self._refrescar(interaction)
 
+    @discord.ui.button(label="🔤 Nombre del canal", style=discord.ButtonStyle.primary, row=3)
+    async def nombre_canal(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(TkCatNameModal(self.nombre, interaction.guild.id))
+
     @discord.ui.button(label="✏️ Descripción", style=discord.ButtonStyle.secondary, row=3)
     async def descripcion(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(TkCatDescModal(self.nombre, interaction.guild.id))
@@ -4157,7 +4795,1524 @@ class TkCatModal(discord.ui.Modal, title="Agregar categoría"):
         elif len(t["cats"]) >= 10:
             return await interaction.response.send_message("❌ Máximo 10 categorías.", ephemeral=True)
         else:
-            t["cats"].append({"nombre": nombre, "desc": self.desc.value.strip(), "roles": [], "ping": []})
+            t["cats"].append({"nombre": nombre, "desc": self.desc.value.strip(), "roles": [], "ping": [], "nombre_canal": "ticket-{numero}"})
+        save()
+        await interaction.response.edit_message(embed=tk_cats_embed(interaction.guild.id), view=TkCatsView(interaction.guild.id))
+
+
+class TkCatDelSelect(discord.ui.Select):
+    def __init__(self, cats):
+        super().__init__(placeholder="🗑️ Eliminar una categoría",
+                         options=[discord.SelectOption(label=c["nombre"][:100], value=c["nombre"][:100]) for c in cats], row=0)
+
+    async def callback(self, interaction: discord.Interaction):
+        t = cfg(interaction.guild.id)["tk"]
+        if len(t["cats"]) <= 1:
+            return await interaction.response.send_message("❌ Debe quedar al menos una categoría.", ephemeral=True)
+        t["cats"] = [c for c in t["cats"] if c["nombre"][:100] != self.values[0]]
+        t["embeds"].pop(f"cat:{self.values[0]}", None)
+        save()
+        await interaction.response.edit_message(embed=tk_cats_embed(interaction.guild.id), view=TkCatsView(interaction.guild.id))
+
+
+class TkCatsView(AdminView):
+    def __init__(self, gid: int):
+        super().__init__()
+        self.add_item(TkCatDelSelect(cfg(gid)["tk"]["cats"][:25]))
+        self.add_item(TkCatPickSelect(cfg(gid)["tk"]["cats"][:25]))
+
+    @discord.ui.button(label="➕ Agregar categoría", style=discord.ButtonStyle.success, row=2)
+    async def agregar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(TkCatModal())
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=2)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=tk_home_embed(interaction.guild.id), view=TkHomeView())
+        if k == "autoresponder":
+            return await interaction.response.edit_message(embed=auto_embed(interaction.guild.id), view=AutoResponderView())
+        if k == "sorteos":
+            return await interaction.response.edit_message(embed=sort_home_embed(interaction.guild.id), view=SortHomeView())
+        if k == "juegos":
+            return await interaction.response.edit_message(embed=juegos_menu_embed(), view=JuegosMenuView())
+        if k == "seguridad":
+            if interaction.user.id != interaction.guild.owner_id:
+                await interaction.response.send_message(
+                    "🔒 Solo el **dueño del servidor** puede editar la seguridad. Ya le avisé de este intento.", ephemeral=True)
+                return await alertar_intento_seguridad(interaction, "Menú de configuración → Seguridad")
+            return await interaction.response.edit_message(embed=seg_home_embed(interaction.guild.id), view=SegHomeView())
+        if k == "moderacion":
+            return await interaction.response.edit_message(embed=mod_home_embed(interaction.guild.id), view=ModHomeView())
+        if k == "postulaciones":
+            return await interaction.response.edit_message(embed=post_home_embed(interaction.guild.id), view=PostHomeView())
+        if k == "eventos":
+            return await interaction.response.edit_message(
+                embeds=ev_panel(interaction.guild.id, interaction.user.id), view=EvConfigView()
+            )
+        e, n, _ = SECCIONES[k]
+        embed = discord.Embed(
+            title=f"{e} {n}", description="🚧 Esta sección se agregará en la siguiente fase.", color=0x95A5A6
+        )
+        await interaction.response.edit_message(embed=embed, view=BackView())
+
+
+class BackView(AdminView):
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=home_embed(), view=HomeView())
+
+
+class SugView(AdminView):
+    @discord.ui.select(
+        cls=discord.ui.ChannelSelect,
+        channel_types=[discord.ChannelType.text],
+        placeholder="Elige el canal de sugerencias",
+    )
+    async def canal(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        cfg(interaction.guild.id)["sug"]["canal"] = select.values[0].id
+        save()
+        await interaction.response.edit_message(embed=sug_embed(interaction.guild.id), view=self)
+
+    @discord.ui.select(
+        cls=discord.ui.RoleSelect,
+        min_values=0,
+        max_values=10,
+        placeholder="Roles que aprueban/rechazan",
+    )
+    async def roles(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        cfg(interaction.guild.id)["sug"]["roles"] = [r.id for r in select.values]
+        save()
+        await interaction.response.edit_message(embed=sug_embed(interaction.guild.id), view=self)
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=home_embed(), view=HomeView())
+
+
+def ev_panel(guild_id: int, user_id: int):
+    c = cfg(guild_id)["ev"]
+    info = discord.Embed(title="🎉 Configurar eventos", color=0x5865F2)
+    info.add_field(
+        name="Roles que pueden organizar / iniciar / finalizar",
+        value=" ".join(f"<@&{r}>" for r in c["roles"]) or "Solo administradores",
+        inline=False,
+    )
+    info.set_footer(text="Abajo está la vista previa del embed. Se actualiza al editarlo.")
+    ejemplo = {
+        "style": c["style"],
+        "descripcion": "Así se verá la descripción del evento.",
+        "organizador": user_id,
+        "tipo": "Ejemplo",
+        "premio": "Premio de ejemplo",
+        "tiempo": "30 minutos",
+        "estado": "abierto",
+        "participantes": [],
+    }
+    return [info, build_event_embed(ejemplo)]
+
+
+class EvTextoModal(discord.ui.Modal, title="Editar texto y color"):
+    def __init__(self, guild_id: int):
+        super().__init__()
+        st = cfg(guild_id)["ev"]["style"]
+        self.titulo = discord.ui.TextInput(label="Título", default=st["titulo"], max_length=100)
+        self.color = discord.ui.TextInput(label="Color (hex, ej: 5865F2)", default=st["color"], min_length=6, max_length=7)
+        self.footer = discord.ui.TextInput(
+            label="Pie de página (vacío = ninguno)", default=st["footer"] or "", required=False, max_length=100
+        )
+        for i in (self.titulo, self.color, self.footer):
+            self.add_item(i)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        hexa = self.color.value.lstrip("#")
+        try:
+            if len(hexa) != 6:
+                raise ValueError
+            int(hexa, 16)
+        except ValueError:
+            return await interaction.response.send_message("❌ Color inválido. Usa 6 dígitos hex, ej: 5865F2.", ephemeral=True)
+        st = cfg(interaction.guild.id)["ev"]["style"]
+        st["titulo"] = self.titulo.value
+        st["color"] = hexa
+        st["footer"] = self.footer.value or None
+        save()
+        await interaction.response.edit_message(embeds=ev_panel(interaction.guild.id, interaction.user.id), view=EvConfigView())
+
+
+class EvImagenModal(discord.ui.Modal, title="Editar imágenes"):
+    def __init__(self, guild_id: int):
+        super().__init__()
+        st = cfg(guild_id)["ev"]["style"]
+        self.imagen = discord.ui.TextInput(
+            label="URL de la imagen grande (vacío = ninguna)", default=st["imagen"] or "", required=False
+        )
+        self.miniatura = discord.ui.TextInput(
+            label="URL de la miniatura (vacío = ninguna)", default=st["miniatura"] or "", required=False
+        )
+        self.add_item(self.imagen)
+        self.add_item(self.miniatura)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        for url in (self.imagen.value, self.miniatura.value):
+            if url and not url.startswith(("http://", "https://")):
+                return await interaction.response.send_message("❌ Las URLs deben empezar con http:// o https://", ephemeral=True)
+        st = cfg(interaction.guild.id)["ev"]["style"]
+        st["imagen"] = self.imagen.value or None
+        st["miniatura"] = self.miniatura.value or None
+        save()
+        await interaction.response.edit_message(embeds=ev_panel(interaction.guild.id, interaction.user.id), view=EvConfigView())
+
+
+class EvConfigView(AdminView):
+    @discord.ui.select(
+        cls=discord.ui.RoleSelect, min_values=1, max_values=10,
+        placeholder="➕ Agregar roles que pueden organizar eventos", row=0,
+    )
+    async def agregar(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        roles = cfg(interaction.guild.id)["ev"]["roles"]
+        for r in select.values:
+            if r.id not in roles:
+                roles.append(r.id)
+        save()
+        await interaction.response.edit_message(embeds=ev_panel(interaction.guild.id, interaction.user.id), view=EvConfigView())
+
+    @discord.ui.select(
+        cls=discord.ui.RoleSelect, min_values=1, max_values=10,
+        placeholder="➖ Quitar roles", row=1,
+    )
+    async def quitar(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        c = cfg(interaction.guild.id)["ev"]
+        quitar = {r.id for r in select.values}
+        c["roles"] = [r for r in c["roles"] if r not in quitar]
+        save()
+        await interaction.response.edit_message(embeds=ev_panel(interaction.guild.id, interaction.user.id), view=EvConfigView())
+
+    @discord.ui.button(label="✏️ Texto y color", style=discord.ButtonStyle.primary, row=2)
+    async def texto(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(EvTextoModal(interaction.guild.id))
+
+    @discord.ui.button(label="🖼️ Imágenes", style=discord.ButtonStyle.primary, row=2)
+    async def imagenes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(EvImagenModal(interaction.guild.id))
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=2)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=home_embed(), view=HomeView())
+
+
+POST_EMBED_NOMBRES = {
+    "publica": "Embed público (con botón)",
+    "respuestas": "Embed de respuestas (canal staff)",
+    "aprobada": "MD: postulación aprobada",
+    "rechazada": "MD: postulación rechazada",
+}
+
+
+def _roles(ids, vacio):
+    return " ".join(f"<@&{r}>" for r in ids) or vacio
+
+
+def post_home_embed(gid: int):
+    p = cfg(gid)["post"]
+    e = discord.Embed(title="📝 Configurar postulaciones", color=0x5865F2)
+    forms = "\n".join(f"• **{n}** ({len(q)} preguntas)" for n, q in p["forms"].items())
+    e.add_field(name="Formularios", value=forms or "Ninguno todavía. Entra a **Formularios** para crear uno.", inline=False)
+    e.add_field(name="Pueden enviar postulaciones", value=_roles(p["roles_enviar"], "Solo administradores"), inline=False)
+    e.add_field(name="Aprueban / rechazan", value=_roles(p["roles_revisar"], "Solo administradores"), inline=False)
+    e.add_field(name="Canal de respuestas", value=f"<#{p['canal']}>" if p["canal"] else "No configurado", inline=False)
+    return e
+
+
+def post_forms_embed(gid: int):
+    p = cfg(gid)["post"]
+    e = discord.Embed(title="📋 Formularios", color=0x5865F2)
+    if not p["forms"]:
+        e.description = "Aún no hay formularios. Pulsa **Agregar / editar formulario**."
+    for n, qs in p["forms"].items():
+        e.add_field(name=n, value="\n".join(f"{i}. {q}" for i, q in enumerate(qs, 1))[:1024], inline=False)
+    e.set_footer(text="Si agregas un formulario con un nombre que ya existe, se reemplaza.")
+    return e
+
+
+def post_embeds_menu_embed():
+    return discord.Embed(
+        title="🎨 Embeds de postulación",
+        description="Elige cuál quieres editar:\n\n" + "\n".join(f"• **{v}**" for v in POST_EMBED_NOMBRES.values())
+        + "\n\nUsa `/variables` para ver las variables disponibles.",
+        color=0x5865F2,
+    )
+
+
+def post_embed_panel(guild, user_id: int, key: str):
+    p = cfg(guild.id)["post"]
+    info = discord.Embed(
+        title=f"🎨 Editando: {POST_EMBED_NOMBRES[key]}",
+        description="Variables: " + ", ".join(f"`{k}`" for k in VARIABLES) + "\n\nAbajo ves la vista previa en vivo.",
+        color=0x5865F2,
+    )
+    rec = {
+        "candidato": user_id, "ejecutor": user_id, "numero": 1, "formulario": "Staff",
+        "respuestas": [["¿Por qué quieres unirte?", "Respuesta de ejemplo."]],
+    }
+    if key == "respuestas":
+        prev = build_resp_embed(guild, rec)
+    else:
+        prev = post_embed(p["embeds"][key], post_vars(guild, rec, staff=f"<@{user_id}>", nota="Nota de ejemplo."))
+    return [info, prev]
+
+
+class PostDelSelect(discord.ui.Select):
+    def __init__(self, nombres):
+        super().__init__(
+            placeholder="🗑️ Eliminar un formulario",
+            options=[discord.SelectOption(label=n[:100], value=n) for n in nombres],
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        cfg(interaction.guild.id)["post"]["forms"].pop(self.values[0], None)
+        save()
+        await interaction.response.edit_message(embed=post_forms_embed(interaction.guild.id), view=PostFormsView(interaction.guild.id))
+
+
+class PostFormModal(discord.ui.Modal, title="Agregar / editar formulario"):
+    def __init__(self):
+        super().__init__()
+        self.nombre = discord.ui.TextInput(label="Nombre del formulario", max_length=50, placeholder="Ej: Staff")
+        self.preguntas = discord.ui.TextInput(
+            label="Preguntas (una por línea, máx. 10)",
+            style=discord.TextStyle.paragraph,
+            max_length=1500,
+            placeholder="¿Cuántos años tienes?\n¿Por qué quieres ser staff?",
+        )
+        self.add_item(self.nombre)
+        self.add_item(self.preguntas)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        qs = [l.strip() for l in self.preguntas.value.splitlines() if l.strip()]
+        if not qs or len(qs) > 10 or any(len(q) > 100 for q in qs):
+            return await interaction.response.send_message(
+                "❌ Escribe entre 1 y 10 preguntas, de máximo 100 caracteres cada una.", ephemeral=True
+            )
+        cfg(interaction.guild.id)["post"]["forms"][self.nombre.value.strip()] = qs
+        save()
+        await interaction.response.edit_message(embed=post_forms_embed(interaction.guild.id), view=PostFormsView(interaction.guild.id))
+
+
+class PostFormsView(AdminView):
+    def __init__(self, gid: int):
+        super().__init__()
+        nombres = list(cfg(gid)["post"]["forms"])[:25]
+        if nombres:
+            self.add_item(PostDelSelect(nombres))
+
+    @discord.ui.button(label="➕ Agregar / editar formulario", style=discord.ButtonStyle.success, row=1)
+    async def agregar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(PostFormModal())
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=1)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=post_home_embed(interaction.guild.id), view=PostHomeView())
+
+
+class PostRolesView(AdminView):
+    @discord.ui.select(cls=discord.ui.RoleSelect, min_values=0, max_values=10,
+                       placeholder="Roles que pueden enviar postulaciones", row=0)
+    async def enviar(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        cfg(interaction.guild.id)["post"]["roles_enviar"] = [r.id for r in select.values]
+        save()
+        await interaction.response.edit_message(embed=post_home_embed(interaction.guild.id), view=PostRolesView())
+
+    @discord.ui.select(cls=discord.ui.RoleSelect, min_values=0, max_values=10,
+                       placeholder="Roles que aprueban / rechazan", row=1)
+    async def revisar(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        cfg(interaction.guild.id)["post"]["roles_revisar"] = [r.id for r in select.values]
+        save()
+        await interaction.response.edit_message(embed=post_home_embed(interaction.guild.id), view=PostRolesView())
+
+    @discord.ui.select(cls=discord.ui.ChannelSelect, channel_types=[discord.ChannelType.text],
+                       placeholder="Canal donde llegan las respuestas", row=2)
+    async def canal(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        cfg(interaction.guild.id)["post"]["canal"] = select.values[0].id
+        save()
+        await interaction.response.edit_message(embed=post_home_embed(interaction.guild.id), view=PostRolesView())
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=3)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=post_home_embed(interaction.guild.id), view=PostHomeView())
+
+
+class PostTextoModal(discord.ui.Modal, title="Título, autor y color"):
+    def __init__(self, key: str, gid: int):
+        super().__init__()
+        self.key = key
+        st = cfg(gid)["post"]["embeds"][key]
+        self.titulo = discord.ui.TextInput(label="Título", default=st.get("titulo") or "", required=False, max_length=256)
+        self.autor = discord.ui.TextInput(label="Autor", default=st.get("autor") or "", required=False, max_length=100)
+        self.color = discord.ui.TextInput(label="Color (hex, ej: 5865F2)", default=st["color"], min_length=6, max_length=7)
+        self.footer = discord.ui.TextInput(label="Pie de página", default=st.get("footer") or "", required=False, max_length=100)
+        for i in (self.titulo, self.autor, self.color, self.footer):
+            self.add_item(i)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        hexa = self.color.value.lstrip("#")
+        try:
+            if len(hexa) != 6:
+                raise ValueError
+            int(hexa, 16)
+        except ValueError:
+            return await interaction.response.send_message("❌ Color inválido. Usa 6 dígitos hex.", ephemeral=True)
+        st = cfg(interaction.guild.id)["post"]["embeds"][self.key]
+        st["titulo"] = self.titulo.value or None
+        st["autor"] = self.autor.value or None
+        st["color"] = hexa
+        st["footer"] = self.footer.value or None
+        save()
+        await interaction.response.edit_message(
+            embeds=post_embed_panel(interaction.guild, interaction.user.id, self.key), view=PostEmbedEditView(self.key)
+        )
+
+
+class PostDescModal(discord.ui.Modal, title="Descripción"):
+    def __init__(self, key: str, gid: int):
+        super().__init__()
+        self.key = key
+        st = cfg(gid)["post"]["embeds"][key]
+        self.desc = discord.ui.TextInput(
+            label="Descripción (puedes usar variables)", style=discord.TextStyle.paragraph,
+            default=st.get("descripcion") or "", required=False, max_length=2000,
+        )
+        self.add_item(self.desc)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        cfg(interaction.guild.id)["post"]["embeds"][self.key]["descripcion"] = self.desc.value or None
+        save()
+        await interaction.response.edit_message(
+            embeds=post_embed_panel(interaction.guild, interaction.user.id, self.key), view=PostEmbedEditView(self.key)
+        )
+
+
+class PostImgModal(discord.ui.Modal, title="Imágenes"):
+    def __init__(self, key: str, gid: int):
+        super().__init__()
+        self.key = key
+        st = cfg(gid)["post"]["embeds"][key]
+        self.mini = discord.ui.TextInput(label="URL de la imagen chica (miniatura)", default=st.get("miniatura") or "", required=False)
+        self.img = discord.ui.TextInput(label="URL de la imagen grande", default=st.get("imagen") or "", required=False)
+        self.add_item(self.mini)
+        self.add_item(self.img)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        for url in (self.mini.value, self.img.value):
+            if url and not url.startswith(("http://", "https://")):
+                return await interaction.response.send_message("❌ Las URLs deben empezar con http:// o https://", ephemeral=True)
+        st = cfg(interaction.guild.id)["post"]["embeds"][self.key]
+        st["miniatura"] = self.mini.value or None
+        st["imagen"] = self.img.value or None
+        save()
+        await interaction.response.edit_message(
+            embeds=post_embed_panel(interaction.guild, interaction.user.id, self.key), view=PostEmbedEditView(self.key)
+        )
+
+
+class PostEmbedEditView(AdminView):
+    def __init__(self, key: str):
+        super().__init__()
+        self.key = key
+
+    @discord.ui.button(label="✏️ Título, autor y color", style=discord.ButtonStyle.primary, row=0)
+    async def texto(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(PostTextoModal(self.key, interaction.guild.id))
+
+    @discord.ui.button(label="📄 Descripción", style=discord.ButtonStyle.primary, row=0)
+    async def descripcion(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(PostDescModal(self.key, interaction.guild.id))
+
+    @discord.ui.button(label="🖼️ Imágenes", style=discord.ButtonStyle.primary, row=0)
+    async def imagenes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(PostImgModal(self.key, interaction.guild.id))
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=1)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=post_home_embed(interaction.guild.id), view=PostHomeView())
+
+
+class PostRolesView(AdminView):
+    @discord.ui.select(cls=discord.ui.RoleSelect, min_values=0, max_values=10,
+                       placeholder="Roles que pueden enviar postulaciones", row=0)
+    async def enviar(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        cfg(interaction.guild.id)["post"]["roles_enviar"] = [r.id for r in select.values]
+        save()
+        await interaction.response.edit_message(embed=post_home_embed(interaction.guild.id), view=PostRolesView())
+
+    @discord.ui.select(cls=discord.ui.RoleSelect, min_values=0, max_values=10,
+                       placeholder="Roles que aprueban / rechazan", row=1)
+    async def revisar(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        cfg(interaction.guild.id)["post"]["roles_revisar"] = [r.id for r in select.values]
+        save()
+        await interaction.response.edit_message(embed=post_home_embed(interaction.guild.id), view=PostRolesView())
+
+    @discord.ui.select(cls=discord.ui.ChannelSelect, channel_types=[discord.ChannelType.text],
+                       placeholder="Canal donde llegan las respuestas", row=2)
+    async def canal(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        cfg(interaction.guild.id)["post"]["canal"] = select.values[0].id
+        save()
+        await interaction.response.edit_message(embed=post_home_embed(interaction.guild.id), view=PostRolesView())
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=3)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=post_home_embed(interaction.guild.id), view=PostHomeView())
+
+
+class PostTextoModal(discord.ui.Modal, title="Título, autor y color"):
+    def __init__(self, key: str, gid: int):
+        super().__init__()
+        self.key = key
+        st = cfg(gid)["post"]["embeds"][key]
+        self.titulo = discord.ui.TextInput(label="Título", default=st.get("titulo") or "", required=False, max_length=256)
+        self.autor = discord.ui.TextInput(label="Autor", default=st.get("autor") or "", required=False, max_length=100)
+        self.color = discord.ui.TextInput(label="Color (hex, ej: 5865F2)", default=st["color"], min_length=6, max_length=7)
+        self.footer = discord.ui.TextInput(label="Pie de página", default=st.get("footer") or "", required=False, max_length=100)
+        for i in (self.titulo, self.autor, self.color, self.footer):
+            self.add_item(i)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        hexa = self.color.value.lstrip("#")
+        try:
+            if len(hexa) != 6:
+                raise ValueError
+            int(hexa, 16)
+        except ValueError:
+            return await interaction.response.send_message("❌ Color inválido. Usa 6 dígitos hex.", ephemeral=True)
+        st = cfg(interaction.guild.id)["post"]["embeds"][self.key]
+        st["titulo"] = self.titulo.value or None
+        st["autor"] = self.autor.value or None
+        st["color"] = hexa
+        st["footer"] = self.footer.value or None
+        save()
+        await interaction.response.edit_message(
+            embeds=post_embed_panel(interaction.guild, interaction.user.id, self.key), view=PostEmbedEditView(self.key)
+        )
+
+
+class PostDescModal(discord.ui.Modal, title="Descripción"):
+    def __init__(self, key: str, gid: int):
+        super().__init__()
+        self.key = key
+        st = cfg(gid)["post"]["embeds"][key]
+        self.desc = discord.ui.TextInput(
+            label="Descripción (puedes usar variables)", style=discord.TextStyle.paragraph,
+            default=st.get("descripcion") or "", required=False, max_length=2000,
+        )
+        self.add_item(self.desc)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        cfg(interaction.guild.id)["post"]["embeds"][self.key]["descripcion"] = self.desc.value or None
+        save()
+        await interaction.response.edit_message(
+            embeds=post_embed_panel(interaction.guild, interaction.user.id, self.key), view=PostEmbedEditView(self.key)
+        )
+
+
+class PostImgModal(discord.ui.Modal, title="Imágenes"):
+    def __init__(self, key: str, gid: int):
+        super().__init__()
+        self.key = key
+        st = cfg(gid)["post"]["embeds"][key]
+        self.mini = discord.ui.TextInput(label="URL de la imagen chica (miniatura)", default=st.get("miniatura") or "", required=False)
+        self.img = discord.ui.TextInput(label="URL de la imagen grande", default=st.get("imagen") or "", required=False)
+        self.add_item(self.mini)
+        self.add_item(self.img)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        for url in (self.mini.value, self.img.value):
+            if url and not url.startswith(("http://", "https://")):
+                return await interaction.response.send_message("❌ Las URLs deben empezar con http:// o https://", ephemeral=True)
+        st = cfg(interaction.guild.id)["post"]["embeds"][self.key]
+        st["miniatura"] = self.mini.value or None
+        st["imagen"] = self.img.value or None
+        save()
+        await interaction.response.edit_message(
+            embeds=post_embed_panel(interaction.guild, interaction.user.id, self.key), view=PostEmbedEditView(self.key)
+        )
+
+
+class PostEmbedEditView(AdminView):
+    def __init__(self, key: str):
+        super().__init__()
+        self.key = key
+
+    @discord.ui.button(label="✏️ Título, autor y color", style=discord.ButtonStyle.primary, row=0)
+    async def texto(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(PostTextoModal(self.key, interaction.guild.id))
+
+    @discord.ui.button(label="📄 Descripción", style=discord.ButtonStyle.primary, row=0)
+    async def descripcion(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(PostDescModal(self.key, interaction.guild.id))
+
+    @discord.ui.button(label="🖼️ Imágenes", style=discord.ButtonStyle.primary, row=0)
+    async def imagenes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(PostImgModal(self.key, interaction.guild.id))
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=1)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=post_embeds_menu_embed(), view=PostEmbedsMenuView())
+
+
+class PostEmbedsMenuView(AdminView):
+    @discord.ui.select(
+        placeholder="¿Qué embed quieres editar?",
+        options=[discord.SelectOption(label=v, value=k) for k, v in POST_EMBED_NOMBRES.items()],
+        row=0,
+    )
+    async def elegir(self, interaction: discord.Interaction, select: discord.ui.Select):
+        key = select.values[0]
+        await interaction.response.edit_message(
+            embeds=post_embed_panel(interaction.guild, interaction.user.id, key), view=PostEmbedEditView(key)
+        )
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=1)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=post_home_embed(interaction.guild.id), view=PostHomeView())
+
+
+class PostHomeView(AdminView):
+    @discord.ui.button(label="📋 Formularios", style=discord.ButtonStyle.primary, row=0)
+    async def formularios(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=post_forms_embed(interaction.guild.id), view=PostFormsView(interaction.guild.id))
+
+    @discord.ui.button(label="🎨 Embeds", style=discord.ButtonStyle.primary, row=0)
+    async def embeds(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=post_embeds_menu_embed(), view=PostEmbedsMenuView())
+
+    @discord.ui.button(label="⚙️ Roles y canal", style=discord.ButtonStyle.primary, row=0)
+    async def roles(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=post_home_embed(interaction.guild.id), view=PostRolesView())
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=1)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=home_embed(), view=HomeView())
+
+
+MOD_EMBED_NOMBRES = {"dm": "MD al usuario sancionado", "registro": "Registro de casos (canal)"}
+
+
+def mod_home_embed(gid: int):
+    m = cfg(gid)["mod"]
+    e = discord.Embed(title="🔨 Configurar moderación", color=0x5865F2)
+    e.add_field(name="Canal de registros", value=f"<#{m['canal']}>" if m["canal"] else "No configurado", inline=False)
+    e.add_field(name="Roles que pueden sancionar",
+                value=" ".join(f"<@&{r}>" for r in m["roles"]) or "Solo administradores", inline=False)
+    e.add_field(name="Casos registrados", value=str(m["contador"]), inline=False)
+    return e
+
+
+def mod_embeds_menu_embed():
+    return discord.Embed(
+        title="🎨 Embeds de moderación",
+        description="Elige cuál quieres editar:\n\n" + "\n".join(f"• **{v}**" for v in MOD_EMBED_NOMBRES.values()),
+        color=0x5865F2,
+    )
+
+
+def mod_embed_panel(guild, user_id: int, key: str):
+    m = cfg(guild.id)["mod"]
+    info = discord.Embed(
+        title=f"🎨 Editando: {MOD_EMBED_NOMBRES[key]}",
+        description="Variables: " + ", ".join(f"`{k}`" for k in MOD_VARIABLES) + "\n\nAbajo ves la vista previa en vivo.",
+        color=0x5865F2,
+    )
+    caso = {"n": 1, "tipo": "Ban", "usuario": user_id, "staff": user_id, "razon": "Razón de ejemplo",
+            "duracion": None, "ts": int(discord.utils.utcnow().timestamp())}
+    return [info, post_embed(m["embeds"][key], mod_vars(guild, caso))]
+
+
+# ── Editor de estilo genérico (título, autor, color, descripción, imágenes) ──
+class StyleTextoModal(discord.ui.Modal, title="Título, autor y color"):
+    def __init__(self, parent, gid: int):
+        super().__init__()
+        self.parent = parent
+        st = cfg(gid)[parent.seccion]["embeds"][parent.key]
+        self.titulo = discord.ui.TextInput(label="Título", default=st.get("titulo") or "", required=False, max_length=256)
+        self.autor = discord.ui.TextInput(label="Autor", default=st.get("autor") or "", required=False, max_length=100)
+        self.color = discord.ui.TextInput(label="Color (hex, ej: 5865F2)", default=st["color"], min_length=6, max_length=7)
+        self.footer = discord.ui.TextInput(label="Pie de página", default=st.get("footer") or "", required=False, max_length=100)
+        for i in (self.titulo, self.autor, self.color, self.footer):
+            self.add_item(i)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        hexa = self.color.value.lstrip("#")
+        try:
+            if len(hexa) != 6:
+                raise ValueError
+            int(hexa, 16)
+        except ValueError:
+            return await interaction.response.send_message("❌ Color inválido. Usa 6 dígitos hex.", ephemeral=True)
+        st = cfg(interaction.guild.id)[self.parent.seccion]["embeds"][self.parent.key]
+        st["titulo"] = self.titulo.value or None
+        st["autor"] = self.autor.value or None
+        st["color"] = hexa
+        st["footer"] = self.footer.value or None
+        save()
+        await interaction.response.edit_message(**self.parent.refrescar(interaction))
+
+
+class StyleDescModal(discord.ui.Modal, title="Descripción"):
+    def __init__(self, parent, gid: int):
+        super().__init__()
+        self.parent = parent
+        st = cfg(gid)[parent.seccion]["embeds"][parent.key]
+        self.desc = discord.ui.TextInput(
+            label="Descripción (puedes usar variables)", style=discord.TextStyle.paragraph,
+            default=st.get("descripcion") or "", required=False, max_length=2000,
+        )
+        self.add_item(self.desc)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        cfg(interaction.guild.id)[self.parent.seccion]["embeds"][self.parent.key]["descripcion"] = self.desc.value or None
+        save()
+        await interaction.response.edit_message(**self.parent.refrescar(interaction))
+
+
+class StyleImgModal(discord.ui.Modal, title="Imágenes"):
+    def __init__(self, parent, gid: int):
+        super().__init__()
+        self.parent = parent
+        st = cfg(gid)[parent.seccion]["embeds"][parent.key]
+        self.mini = discord.ui.TextInput(label="URL de la imagen chica (miniatura)", default=st.get("miniatura") or "", required=False)
+        self.img = discord.ui.TextInput(label="URL de la imagen grande", default=st.get("imagen") or "", required=False)
+        self.add_item(self.mini)
+        self.add_item(self.img)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        for url in (self.mini.value, self.img.value):
+            if url and not url.startswith(("http://", "https://")):
+                return await interaction.response.send_message("❌ Las URLs deben empezar con http:// o https://", ephemeral=True)
+        st = cfg(interaction.guild.id)[self.parent.seccion]["embeds"][self.parent.key]
+        st["miniatura"] = self.mini.value or None
+        st["imagen"] = self.img.value or None
+        save()
+        await interaction.response.edit_message(**self.parent.refrescar(interaction))
+
+
+class StyleEditView(AdminView):
+    def __init__(self, seccion, key, preview, volver, con_desc=True):
+        super().__init__()
+        self.seccion, self.key, self.preview, self.volver_fn = seccion, key, preview, volver
+        if not con_desc:
+            self.remove_item(self.descripcion)
+
+    def refrescar(self, interaction):
+        return {"embeds": self.preview(interaction.guild, interaction.user.id, self.key), "view": self}
+
+    @discord.ui.button(label="✏️ Título, autor y color", style=discord.ButtonStyle.primary, row=0)
+    async def texto(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(StyleTextoModal(self, interaction.guild.id))
+
+    @discord.ui.button(label="📄 Descripción", style=discord.ButtonStyle.primary, row=0)
+    async def descripcion(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(StyleDescModal(self, interaction.guild.id))
+
+    @discord.ui.button(label="🖼️ Imágenes", style=discord.ButtonStyle.primary, row=0)
+    async def imagenes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(StyleImgModal(self, interaction.guild.id))
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=1)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.volver_fn(interaction)
+
+
+async def volver_mod_menu(interaction: discord.Interaction):
+    await interaction.response.edit_message(embed=mod_embeds_menu_embed(), view=ModEmbedsMenuView())
+
+
+class ModEmbedsMenuView(AdminView):
+    @discord.ui.select(
+        placeholder="¿Qué embed quieres editar?",
+        options=[discord.SelectOption(label=v, value=k) for k, v in MOD_EMBED_NOMBRES.items()],
+        row=0,
+    )
+    async def elegir(self, interaction: discord.Interaction, select: discord.ui.Select):
+        key = select.values[0]
+        view = StyleEditView("mod", key, mod_embed_panel, volver_mod_menu)
+        await interaction.response.edit_message(embeds=mod_embed_panel(interaction.guild, interaction.user.id, key), view=view)
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=1)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=mod_home_embed(interaction.guild.id), view=ModHomeView())
+
+
+class ModHomeView(AdminView):
+    @discord.ui.select(cls=discord.ui.ChannelSelect, channel_types=[discord.ChannelType.text],
+                       placeholder="Canal de registros de sanciones", row=0)
+    async def canal(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        cfg(interaction.guild.id)["mod"]["canal"] = select.values[0].id
+        save()
+        await interaction.response.edit_message(embed=mod_home_embed(interaction.guild.id), view=ModHomeView())
+
+    @discord.ui.select(cls=discord.ui.RoleSelect, min_values=0, max_values=10,
+                       placeholder="Roles que pueden sancionar", row=1)
+    async def roles(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        cfg(interaction.guild.id)["mod"]["roles"] = [r.id for r in select.values]
+        save()
+        await interaction.response.edit_message(embed=mod_home_embed(interaction.guild.id), view=ModHomeView())
+
+    @discord.ui.button(label="🎨 Embeds", style=discord.ButtonStyle.primary, row=2)
+    async def embeds(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=mod_embeds_menu_embed(), view=ModEmbedsMenuView())
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=2)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=home_embed(), view=HomeView())
+
+
+SEG_SECCIONES = {
+    "antibot": ("🤖", "Anti-Bot", "Banea bots no autorizados y a quien los agrega"),
+    "antiraid": ("🚨", "Anti-Raid", "Detecta entradas masivas de cuentas"),
+    "antispam": ("💬", "Anti-Spam", "Frena el flood y las menciones masivas"),
+    "antichannel": ("📁", "Anti-Channel", "Protege la creación y cambios de canales"),
+    "antiroles": ("🎭", "Anti-Roles", "Protege roles y permisos peligrosos"),
+    "staff_guard": ("🔐", "Protección Staff", "Aprueba cualquier asignación de roles de staff"),
+    "whitelist": ("📃", "White-List", "Usuarios, bots y roles exentos"),
+}
+
+SEG_INFO = {
+    "antibot": (
+        "🤖 Anti-Bot",
+        "Cuando está activo, **cualquier bot que entre al servidor** (aunque esté offline, oculto o sea un "
+        "«bot fantasma») es **baneado**, y también se banea a **quien lo agregó**.\n\n"
+        "**Excepciones:** bots en la White-List y bots agregados por el dueño o por alguien de la White-List.\n\n"
+        "⚠️ Necesito los permisos *Banear miembros* y *Ver registro de auditoría* (para saber quién lo agregó). "
+        "Mi rol debe estar por encima del de quien agregue el bot.",
+    ),
+    "antiraid": (
+        "🚨 Anti-Raid",
+        "Si entran demasiadas cuentas en pocos segundos, aplico la acción elegida a esas cuentas y activo un "
+        "**modo raid de 2 minutos**: cada nueva entrada recibe la misma acción.\n\nLa White-List queda exenta.",
+    ),
+    "antispam": (
+        "💬 Anti-Spam",
+        "Borra los mensajes de quien manda demasiados en poco tiempo, o menciona a demasiada gente en uno solo, "
+        "y lo **aísla (timeout)**.\n\n**Exentos:** administradores, roles de moderación configurados y la White-List.",
+    ),
+    "antichannel": (
+        "📁 Anti-Channel",
+        "Protege los canales contra creación, eliminación o cambios no autorizados. El dueño y la White-List quedan exentos.",
+    ),
+    "antiroles": (
+        "🎭 Anti-Roles",
+        "Protege la creación, eliminación y modificación de roles. Además bloquea permisos peligrosos en roles no autorizados.",
+    ),
+    "staff_guard": (
+        "🔐 Protección Staff",
+        "Los roles marcados como **roles de staff** no se pueden asignar directamente. Nexus retira el rol y pide aprobación al dueño por MD.",
+    ),
+}
+
+
+def _estado(on):
+    return "🟢 Activado" if on else "🔴 Desactivado"
+
+
+def seg_home_embed(gid: int):
+    s = cfg(gid)["seg"]
+    e = discord.Embed(title="🛡️ Configurar seguridad", color=0x5865F2,
+                      description="Elige una opción en el menú. Cada una tiene su propio panel.")
+    e.add_field(name="🤖 Anti-Bot", value=_estado(s["antibot"]["on"]), inline=True)
+    e.add_field(name="🚨 Anti-Raid", value=_estado(s["antiraid"]["on"]), inline=True)
+    e.add_field(name="💬 Anti-Spam", value=_estado(s["antispam"]["on"]), inline=True)
+    e.add_field(name="📁 Anti-Channel", value=_estado(s["antichannel"]["on"]), inline=True)
+    e.add_field(name="🎭 Anti-Roles", value=_estado(s["antiroles"]["on"]), inline=True)
+    e.add_field(name="🔐 Protección Staff", value=_estado(s["staff_guard"]["on"]), inline=True)
+    e.add_field(name="📃 White-List", value=f"{len(s['wl']['usuarios'])} usuario(s)/bot(s) · {len(s['wl']['roles'])} rol(es)", inline=False)
+    e.add_field(name="Canal de registros de seguridad", value=f"<#{s['canal']}>" if s["canal"] else "No configurado", inline=False)
+    e.set_footer(text="🔒 Solo el dueño del servidor puede editar esta sección.")
+    return e
+
+
+def seg_panel_embed(gid: int, key: str):
+    s = cfg(gid)["seg"]
+    a = s[key]
+    titulo, desc = SEG_INFO[key]
+    e = discord.Embed(title=titulo, description=desc, color=0x2ECC71 if a["on"] else 0xE74C3C)
+    e.add_field(name="Estado", value=_estado(a["on"]), inline=False)
+    if key == "antiraid":
+        e.add_field(name="Umbral", value=f"{a['joins']} entradas en {a['segundos']} s", inline=True)
+        e.add_field(name="Acción", value="🔨 Banear" if a["accion"] == "ban" else "👢 Expulsar", inline=True)
+    if key == "antispam":
+        e.add_field(name="Límite", value=f"{a['mensajes']} mensajes en {a['segundos']} s", inline=True)
+        e.add_field(name="Menciones", value=f"máx. {a['menciones']} por mensaje", inline=True)
+        e.add_field(name="Aislamiento", value=f"{a['timeout']} min", inline=True)
+    if key == "staff_guard":
+        roles = " ".join(f"<@&{r}>" for r in a.get("roles", [])) or "Ninguno"
+        e.add_field(name="Roles protegidos", value=roles, inline=False)
+        e.add_field(name="Advertencias antes de sanción", value=str(a.get("warnings_before_kick", 2)), inline=True)
+        e.add_field(name="Sanción final", value=a.get("accion", "kick").upper(), inline=True)
+    return e
+
+
+def wl_embed(guild):
+    wl = cfg(guild.id)["seg"]["wl"]
+    e = discord.Embed(
+        title="📃 White-List", color=0x5865F2,
+        description="Los usuarios, bots y roles de esta lista están **exentos** de Anti-Raid y Anti-Spam, "
+        "los bots de la lista pueden entrar, y los bots que agreguen son permitidos.\n"
+        "Para permitir un bot, agrégalo **antes** de invitarlo (puedes usar su ID).",
+    )
+    e.add_field(name="Usuarios y bots", value=" ".join(f"<@{u}>" for u in wl["usuarios"]) or "Nadie todavía", inline=False)
+    e.add_field(name="Roles", value=" ".join(f"<@&{r}>" for r in wl["roles"]) or "Ninguno", inline=False)
+    return e
+
+
+class RaidAccionSelect(discord.ui.Select):
+    def __init__(self, actual: str):
+        super().__init__(
+            placeholder="Acción contra los raiders",
+            options=[
+                discord.SelectOption(label="Expulsar (kick)", value="kick", emoji="👢", default=actual == "kick"),
+                discord.SelectOption(label="Banear (ban)", value="ban", emoji="🔨", default=actual == "ban"),
+            ],
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        cfg(interaction.guild.id)["seg"]["antiraid"]["accion"] = self.values[0]
+        save()
+        await interaction.response.edit_message(
+            embed=seg_panel_embed(interaction.guild.id, "antiraid"), view=SegPanelView("antiraid", interaction.guild.id)
+        )
+
+
+class SegAjustesModal(discord.ui.Modal, title="Ajustes"):
+    CAMPOS = {
+        "antiraid": [("joins", "Entradas para detectar raid (2-50)", 2, 50), ("segundos", "En cuántos segundos (3-120)", 3, 120)],
+        "antispam": [
+            ("mensajes", "Mensajes permitidos (2-20)", 2, 20),
+            ("segundos", "En cuántos segundos (2-30)", 2, 30),
+            ("timeout", "Minutos de aislamiento (1-1440)", 1, 1440),
+            ("menciones", "Máx. menciones por mensaje (2-50)", 2, 50),
+        ],
+    }
+
+    def __init__(self, key: str, gid: int):
+        super().__init__()
+        self.key = key
+        a = cfg(gid)["seg"][key]
+        self.inputs = {}
+        for campo, etiqueta, _, _ in self.CAMPOS[key]:
+            ti = discord.ui.TextInput(label=etiqueta, default=str(a[campo]), max_length=5)
+            self.inputs[campo] = ti
+            self.add_item(ti)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        nuevos = {}
+        for campo, etiqueta, lo, hi in self.CAMPOS[self.key]:
+            try:
+                v = int(self.inputs[campo].value)
+            except ValueError:
+                return await interaction.response.send_message(f"❌ «{etiqueta}» debe ser un número.", ephemeral=True)
+            if not lo <= v <= hi:
+                return await interaction.response.send_message(f"❌ «{etiqueta}» debe estar entre {lo} y {hi}.", ephemeral=True)
+            nuevos[campo] = v
+        cfg(interaction.guild.id)["seg"][self.key].update(nuevos)
+        save()
+        await interaction.response.edit_message(
+            embed=seg_panel_embed(interaction.guild.id, self.key), view=SegPanelView(self.key, interaction.guild.id)
+        )
+
+
+
+class StaffGuardRoleSelect(discord.ui.RoleSelect):
+    def __init__(self):
+        super().__init__(min_values=0, max_values=10,
+                         placeholder="Roles de staff que deben pedir aprobación", row=0)
+    async def callback(self, interaction: discord.Interaction):
+        cfg(interaction.guild.id)["seg"]["staff_guard"]["roles"] = [r.id for r in self.values]
+        save()
+        await interaction.response.edit_message(
+            embed=seg_panel_embed(interaction.guild.id, "staff_guard"),
+            view=SegPanelView("staff_guard", interaction.guild.id)
+        )
+
+
+class StaffGuardActionSelect(discord.ui.Select):
+    def __init__(self, actual: str):
+        super().__init__(
+            placeholder="Sanción al superar las advertencias",
+            options=[
+                discord.SelectOption(label="Kick", value="kick", emoji="👢", default=actual == "kick"),
+                discord.SelectOption(label="Ban", value="ban", emoji="🔨", default=actual == "ban"),
+            ], row=2)
+    async def callback(self, interaction: discord.Interaction):
+        cfg(interaction.guild.id)["seg"]["staff_guard"]["accion"] = self.values[0]
+        save()
+        await interaction.response.edit_message(
+            embed=seg_panel_embed(interaction.guild.id, "staff_guard"),
+            view=SegPanelView("staff_guard", interaction.guild.id)
+        )
+
+
+class StaffGuardWarningsModal(discord.ui.Modal, title="Advertencias de Protección Staff"):
+    def __init__(self, gid):
+        super().__init__()
+        actual = cfg(gid)["seg"]["staff_guard"].get("warnings_before_kick", 2)
+        self.n = discord.ui.TextInput(
+            label="Advertencias antes de sancionar", default=str(actual),
+            min_length=1, max_length=2, placeholder="Ej: 2"
+        )
+        self.add_item(self.n)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            n = int(self.n.value)
+            if not 1 <= n <= 10:
+                raise ValueError
+        except ValueError:
+            return await interaction.response.send_message("❌ Escribe un número entre 1 y 10.", ephemeral=True)
+        cfg(interaction.guild.id)["seg"]["staff_guard"]["warnings_before_kick"] = n
+        save()
+        await interaction.response.edit_message(
+            embed=seg_panel_embed(interaction.guild.id, "staff_guard"),
+            view=SegPanelView("staff_guard", interaction.guild.id)
+        )
+
+
+class SegPanelView(SoloDuenoView):
+    def __init__(self, key: str, gid: int):
+        super().__init__()
+        self.key = key
+        self.nombre_panel = f"Seguridad → {SEG_INFO[key][0]}"
+        a = cfg(gid)["seg"][key]
+        self.toggle.label = "Desactivar" if a["on"] else "Activar"
+        self.toggle.style = discord.ButtonStyle.danger if a["on"] else discord.ButtonStyle.success
+        if key in ("antibot", "antichannel", "antiroles", "staff_guard"):
+            self.remove_item(self.ajustes)
+        if key != "staff_guard":
+            self.remove_item(self.roles_staff)
+            self.remove_item(self.staff_warnings)
+        if key == "antiraid":
+            self.add_item(RaidAccionSelect(a["accion"]))
+        if key == "staff_guard":
+            self.add_item(StaffGuardRoleSelect())
+            self.add_item(StaffGuardActionSelect(a.get("accion", "kick")))
+
+
+    @discord.ui.button(label="🎭 Configurar roles staff", style=discord.ButtonStyle.primary, row=1)
+    async def roles_staff(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.key != "staff_guard":
+            return await interaction.response.send_message("Esta opción solo corresponde a Protección Staff.", ephemeral=True)
+        # El RoleSelect añadido arriba maneja la selección; este botón solo informa.
+        await interaction.response.send_message("Usa el selector de roles de arriba para marcar los roles protegidos.", ephemeral=True)
+
+    @discord.ui.button(label="⚙️ Advertencias", style=discord.ButtonStyle.secondary, row=1)
+    async def staff_warnings(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.key != "staff_guard":
+            return await interaction.response.send_modal(SegAjustesModal(self.key, interaction.guild.id))
+        await interaction.response.send_modal(StaffGuardWarningsModal(interaction.guild.id))
+
+    @discord.ui.button(label="Activar", row=1)
+    async def toggle(self, interaction: discord.Interaction, button: discord.ui.Button):
+        a = cfg(interaction.guild.id)["seg"][self.key]
+        a["on"] = not a["on"]
+        save()
+        await interaction.response.edit_message(
+            embed=seg_panel_embed(interaction.guild.id, self.key), view=SegPanelView(self.key, interaction.guild.id)
+        )
+
+    @discord.ui.button(label="⚙️ Ajustes", style=discord.ButtonStyle.primary, row=1)
+    async def ajustes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(SegAjustesModal(self.key, interaction.guild.id))
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=1)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=seg_home_embed(interaction.guild.id), view=SegHomeView())
+
+
+class WLRemoveSelect(discord.ui.Select):
+    def __init__(self, guild):
+        wl = cfg(guild.id)["seg"]["wl"]
+        opciones = []
+        for uid in wl["usuarios"]:
+            u = guild.get_member(uid) or client.get_user(uid)
+            opciones.append(discord.SelectOption(label=f"👤 {u}"[:100] if u else f"👤 ID {uid}", value=f"u:{uid}"))
+        for rid in wl["roles"]:
+            r = guild.get_role(rid)
+            opciones.append(discord.SelectOption(label=f"🎭 {r.name}"[:100] if r else f"🎭 ID {rid}", value=f"r:{rid}"))
+        super().__init__(placeholder="🗑️ Quitar de la White-List", options=opciones[:25], row=2)
+
+    async def callback(self, interaction: discord.Interaction):
+        wl = cfg(interaction.guild.id)["seg"]["wl"]
+        tipo, _, ident = self.values[0].partition(":")
+        lista = wl["usuarios"] if tipo == "u" else wl["roles"]
+        if int(ident) in lista:
+            lista.remove(int(ident))
+        save()
+        await interaction.response.edit_message(embed=wl_embed(interaction.guild), view=WLView(interaction.guild))
+
+
+class WLIdModal(discord.ui.Modal, title="Agregar por ID"):
+    def __init__(self):
+        super().__init__()
+        self.ident = discord.ui.TextInput(label="ID del usuario o bot", min_length=15, max_length=22, placeholder="123456789012345678")
+        self.add_item(self.ident)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            uid = int(self.ident.value.strip())
+        except ValueError:
+            return await interaction.response.send_message("❌ Eso no parece un ID válido.", ephemeral=True)
+        wl = cfg(interaction.guild.id)["seg"]["wl"]
+        if uid not in wl["usuarios"]:
+            wl["usuarios"].append(uid)
+            save()
+        await interaction.response.edit_message(embed=wl_embed(interaction.guild), view=WLView(interaction.guild))
+
+
+class WLView(SoloDuenoView):
+    nombre_panel = "Seguridad → White-List"
+
+    def __init__(self, guild):
+        super().__init__()
+        wl = cfg(guild.id)["seg"]["wl"]
+        if wl["usuarios"] or wl["roles"]:
+            self.add_item(WLRemoveSelect(guild))
+
+    @discord.ui.select(cls=discord.ui.UserSelect, min_values=1, max_values=10,
+                       placeholder="➕ Agregar usuarios / bots", row=0)
+    async def agregar_usuarios(self, interaction: discord.Interaction, select: discord.ui.UserSelect):
+        wl = cfg(interaction.guild.id)["seg"]["wl"]
+        for u in select.values:
+            if u.id not in wl["usuarios"]:
+                wl["usuarios"].append(u.id)
+        save()
+        await interaction.response.edit_message(embed=wl_embed(interaction.guild), view=WLView(interaction.guild))
+
+    @discord.ui.select(cls=discord.ui.RoleSelect, min_values=1, max_values=10,
+                       placeholder="➕ Agregar roles", row=1)
+    async def agregar_roles(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        wl = cfg(interaction.guild.id)["seg"]["wl"]
+        for r in select.values:
+            if r.id not in wl["roles"]:
+                wl["roles"].append(r.id)
+        save()
+        await interaction.response.edit_message(embed=wl_embed(interaction.guild), view=WLView(interaction.guild))
+
+    @discord.ui.button(label="➕ Agregar por ID", style=discord.ButtonStyle.primary, row=3)
+    async def por_id(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(WLIdModal())
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=3)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=seg_home_embed(interaction.guild.id), view=SegHomeView())
+
+
+class SegHomeView(SoloDuenoView):
+    nombre_panel = "Seguridad (menú principal)"
+
+    @discord.ui.select(
+        placeholder="¿Qué quieres configurar?",
+        options=[discord.SelectOption(label=n, value=k, emoji=e, description=d) for k, (e, n, d) in SEG_SECCIONES.items()],
+        row=0,
+    )
+    async def elegir(self, interaction: discord.Interaction, select: discord.ui.Select):
+        k = select.values[0]
+        if k == "whitelist":
+            return await interaction.response.edit_message(embed=wl_embed(interaction.guild), view=WLView(interaction.guild))
+        await interaction.response.edit_message(
+            embed=seg_panel_embed(interaction.guild.id, k), view=SegPanelView(k, interaction.guild.id)
+        )
+
+    @discord.ui.select(cls=discord.ui.ChannelSelect, channel_types=[discord.ChannelType.text],
+                       placeholder="Canal de registros de seguridad", row=1)
+    async def canal(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        cfg(interaction.guild.id)["seg"]["canal"] = select.values[0].id
+        save()
+        await interaction.response.edit_message(embed=seg_home_embed(interaction.guild.id), view=SegHomeView())
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=2)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=home_embed(), view=HomeView())
+
+
+JUEGOS_EMBED_NOMBRES = {
+    "ppt": "Piedra, papel o tijera",
+    "dado": "Dado",
+    "tres_raya": "Tres en raya",
+    "adivina": "Adivina la palabra",
+    "numero": "Adivina el número",
+    "desordenada": "Palabra desordenada",
+    "reflejos": "Duelo de reflejos",
+    "trivia": "Trivia",
+    "bola8": "Bola 8 mágica",
+    "conecta4": "Conecta 4",
+    "blackjack": "Blackjack",
+    "slots": "Tragamonedas",
+}
+
+
+def juegos_menu_embed():
+    return discord.Embed(
+        title="🎮 Embeds de los juegos",
+        description="Elige el juego cuyo embed quieres editar:\n\n" + "\n".join(f"• **{v}**" for v in JUEGOS_EMBED_NOMBRES.values())
+        + "\n\nPuedes cambiar título, autor, color, pie de página y las imágenes. "
+        "En el título del dado puedes usar `{caras}` y en el de adivina la palabra, la palabra desordenada y la trivia, `{tema}`.",
+        color=0x5865F2,
+    )
+
+
+def juego_embed_panel(guild, user_id: int, key: str):
+    info = discord.Embed(
+        title=f"🎨 Editando: {JUEGOS_EMBED_NOMBRES[key]}",
+        description="Abajo ves la vista previa en vivo. El contenido de cada partida cambia solo.",
+        color=0x5865F2,
+    )
+    base = discord.Embed(title="(título)", description="Aquí va el contenido de la partida.", color=0x5865F2)
+    return [info, estilo_juego(guild.id, key, base, {"{caras}": "6", "{tema}": "Anime"})]
+
+
+async def volver_juegos_menu(interaction: discord.Interaction):
+    await interaction.response.edit_message(embed=juegos_menu_embed(), view=JuegosMenuView())
+
+
+class JuegosMenuView(AdminView):
+    @discord.ui.select(
+        placeholder="¿Qué juego quieres editar?",
+        options=[discord.SelectOption(label=v, value=k, emoji="🎮") for k, v in JUEGOS_EMBED_NOMBRES.items()],
+        row=0,
+    )
+    async def elegir(self, interaction: discord.Interaction, select: discord.ui.Select):
+        key = select.values[0]
+        view = StyleEditView("juegos", key, juego_embed_panel, volver_juegos_menu, con_desc=False)
+        await interaction.response.edit_message(embeds=juego_embed_panel(interaction.guild, interaction.user.id, key), view=view)
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=1)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=home_embed(), view=HomeView())
+
+
+# ───────────────────────── Config: Sorteos ─────────────────────────
+SORT_EMBED_NOMBRES = {"sorteo": "Embed del sorteo (activo)", "final": "Embed del sorteo finalizado"}
+
+
+def sort_home_embed(gid: int):
+    s = cfg(gid)["sort"]
+    e = discord.Embed(title="🎁 Configurar sorteos", color=0x5865F2)
+    e.add_field(name="Roles que pueden crear sorteos",
+                value=" ".join(f"<@&{r}>" for r in s["roles"]) or "Solo administradores", inline=False)
+    e.add_field(name="Sorteos activos", value=str(sum(1 for r in s["items"].values() if r["estado"] == "activo")), inline=True)
+    e.add_field(name="Sorteos realizados", value=str(len(s["items"])), inline=True)
+    e.set_footer(text="Comandos: /sorteo crear · /sorteo finalizar · /sorteo reroll")
+    return e
+
+
+def sort_embeds_menu_embed():
+    return discord.Embed(
+        title="🎨 Embeds de sorteos",
+        description="Elige cuál quieres editar:\n\n" + "\n".join(f"• **{v}**" for v in SORT_EMBED_NOMBRES.values()),
+        color=0x5865F2,
+    )
+
+
+def sort_embed_panel(guild, user_id: int, key: str):
+    s = cfg(guild.id)["sort"]
+    info = discord.Embed(
+        title=f"🎨 Editando: {SORT_EMBED_NOMBRES[key]}",
+        description="Variables: " + ", ".join(f"`{k}`" for k in SORT_VARIABLES) + "\n\nAbajo ves la vista previa en vivo.",
+        color=0x5865F2,
+    )
+    rec = {"premio": "Nitro Classic", "ganadores": 1, "fin": int(time.time()) + 3600, "anfitrion": user_id,
+           "participantes": [user_id], "requisito": None}
+    return [info, post_embed(s["embeds"][key], sort_vars(guild, rec, f"<@{user_id}>"))]
+
+
+async def volver_sort_menu(interaction: discord.Interaction):
+    await interaction.response.edit_message(embed=sort_embeds_menu_embed(), view=SortEmbedsMenuView())
+
+
+class SortEmbedsMenuView(AdminView):
+    @discord.ui.select(
+        placeholder="¿Qué embed quieres editar?",
+        options=[discord.SelectOption(label=v, value=k) for k, v in SORT_EMBED_NOMBRES.items()],
+        row=0,
+    )
+    async def elegir(self, interaction: discord.Interaction, select: discord.ui.Select):
+        key = select.values[0]
+        view = StyleEditView("sort", key, sort_embed_panel, volver_sort_menu)
+        await interaction.response.edit_message(embeds=sort_embed_panel(interaction.guild, interaction.user.id, key), view=view)
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=1)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=sort_home_embed(interaction.guild.id), view=SortHomeView())
+
+
+class SortHomeView(AdminView):
+    @discord.ui.select(cls=discord.ui.RoleSelect, min_values=0, max_values=10,
+                       placeholder="Roles que pueden crear sorteos", row=0)
+    async def roles(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        cfg(interaction.guild.id)["sort"]["roles"] = [r.id for r in select.values]
+        save()
+        await interaction.response.edit_message(embed=sort_home_embed(interaction.guild.id), view=SortHomeView())
+
+    @discord.ui.button(label="🎨 Embeds", style=discord.ButtonStyle.primary, row=1)
+    async def embeds(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=sort_embeds_menu_embed(), view=SortEmbedsMenuView())
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=1)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=home_embed(), view=HomeView())
+
+
+# ───────────────────────── Config: Tickets ─────────────────────────
+TK_EMBED_NOMBRES = {
+    "panel": "Panel (menú de categorías)",
+    "ticket": "Mensaje dentro del ticket",
+    "cierre": "Registro de cierre (canal y MD)",
+}
+
+
+def tk_home_embed(gid: int):
+    t = cfg(gid)["tk"]
+    e = discord.Embed(title="🎫 Configurar tickets", color=0x5865F2)
+    e.add_field(name="Categoría de Discord para los canales", value=f"<#{t['categoria']}>" if t["categoria"] else "Sin categoría (se crean sueltos)", inline=False)
+    e.add_field(name="Canal de registros / transcripciones", value=f"<#{t['canal']}>" if t["canal"] else "No configurado", inline=False)
+    e.add_field(name="Roles de staff generales (si la categoría no tiene propios)", value=" ".join(f"<@&{r}>" for r in t["roles"]) or "Solo administradores", inline=False)
+    e.add_field(name="Texto del menú desplegable", value=t.get("placeholder") or TK_PLACEHOLDER_DEFECTO, inline=False)
+    e.add_field(name="Roles que pueden enviar el panel (/ticket-panel)", value=" ".join(f"<@&{r}>" for r in t.get("panel_roles", [])) or "Solo administradores", inline=False)
+    e.add_field(name="Tickets abiertos por usuario", value=f"máx. {t['max']}", inline=True)
+    e.add_field(name="Tickets abiertos ahora", value=str(len(t["abiertos"])), inline=True)
+    e.add_field(name="Categorías del menú", value=", ".join(c["nombre"] for c in t["cats"]), inline=False)
+    e.set_footer(text="En 📋 Categorías cada una puede tener sus propios roles, ping y bienvenida. Luego usa /ticket-panel.")
+    return e
+
+
+def tk_cats_embed(gid: int):
+    t = cfg(gid)["tk"]
+    e = discord.Embed(title="📋 Categorías de tickets", color=0x5865F2)
+    for c in t["cats"]:
+        e.add_field(name=c["nombre"], value=c.get("desc") or "—", inline=False)
+    e.set_footer(text="Elige una para configurar sus roles, ping y bienvenida. Tras cambiar categorías, reenvía el panel con /ticket-panel. Máximo 10.")
+    return e
+
+
+def tk_embeds_menu_embed():
+    return discord.Embed(
+        title="🎨 Embeds de tickets",
+        description="Elige cuál quieres editar:\n\n" + "\n".join(f"• **{v}**" for v in TK_EMBED_NOMBRES.values()),
+        color=0x5865F2,
+    )
+
+
+def tk_embed_panel(guild, user_id: int, key: str):
+    t = cfg(guild.id)["tk"]
+    info = discord.Embed(
+        title="🎨 Editando: " + (f"Bienvenida de «{key[4:]}»" if key.startswith("cat:") else TK_EMBED_NOMBRES[key]),
+        description="Variables: " + ", ".join(f"`{k}`" for k in TK_VARIABLES) + "\n\nAbajo ves la vista previa en vivo.",
+        color=0x5865F2,
+    )
+    rec = {"numero": 1, "usuario": user_id, "categoria": key[4:] if key.startswith("cat:") else t["cats"][0]["nombre"]}
+    return [info, post_embed(t["embeds"][key], tk_vars(guild, rec, staff=f"<@{user_id}>"))]
+
+
+async def volver_tk_menu(interaction: discord.Interaction):
+    await interaction.response.edit_message(embed=tk_embeds_menu_embed(), view=TkEmbedsMenuView())
+
+
+class TkEmbedsMenuView(AdminView):
+    @discord.ui.select(
+        placeholder="¿Qué embed quieres editar?",
+        options=[discord.SelectOption(label=v, value=k) for k, v in TK_EMBED_NOMBRES.items()],
+        row=0,
+    )
+    async def elegir(self, interaction: discord.Interaction, select: discord.ui.Select):
+        key = select.values[0]
+        view = StyleEditView("tk", key, tk_embed_panel, volver_tk_menu)
+        await interaction.response.edit_message(embeds=tk_embed_panel(interaction.guild, interaction.user.id, key), view=view)
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=1)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=tk_home_embed(interaction.guild.id), view=TkHomeView())
+
+
+def _cat_tk(t, nombre: str):
+    return next((c for c in t["cats"] if c["nombre"][:100] == (nombre or "")[:100]), None)
+
+
+def tk_cat_embed(gid: int, nombre: str):
+    t = cfg(gid)["tk"]
+    c = _cat_tk(t, nombre) or {"nombre": nombre}
+    e = discord.Embed(title=f"⚙️ Categoría: {c['nombre']}", color=0x5865F2)
+    e.add_field(name="Descripción", value=c.get("desc") or "—", inline=False)
+    e.add_field(name="Nombre del canal", value=f"`{c.get('nombre_canal', 'ticket-{numero}')}`", inline=False)
+    generales = " ".join(f"<@&{r}>" for r in t["roles"]) or "solo administradores"
+    e.add_field(
+        name="Roles que atienden esta categoría",
+        value=" ".join(f"<@&{r}>" for r in c.get("roles", [])) or f"Los roles de staff generales ({generales})",
+        inline=False,
+    )
+    e.add_field(
+        name="Ping al abrir un ticket",
+        value=" ".join(f"<@&{r}>" for r in c.get("ping", [])) or "Los mismos roles que la atienden",
+        inline=False,
+    )
+    e.add_field(
+        name="Mensaje de bienvenida",
+        value="🎨 Personalizado para esta categoría" if f"cat:{c['nombre']}" in t["embeds"] else "Usa el embed general «Ticket abierto»",
+        inline=False,
+    )
+    e.set_footer(text="Solo esos roles (y los administradores) verán y podrán atender los tickets de esta categoría.")
+    return e
+
+
+async def volver_tk_cat(interaction: discord.Interaction, nombre: str):
+    await interaction.response.edit_message(embeds=[tk_cat_embed(interaction.guild.id, nombre)], view=TkCatConfigView(nombre))
+
+
+class TkCatNameModal(discord.ui.Modal, title="Nombre del canal del ticket"):
+    def __init__(self, nombre: str, gid: int):
+        super().__init__()
+        self.nombre = nombre
+        c = _cat_tk(cfg(gid)["tk"], nombre) or {}
+        self.plantilla = discord.ui.TextInput(
+            label="Plantilla del canal",
+            default=c.get("nombre_canal") or "ticket-{numero}",
+            max_length=95,
+            placeholder="Ej: alianza-{numero} o soporte-{numero}"
+        )
+        self.add_item(self.plantilla)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        c = _cat_tk(cfg(interaction.guild.id)["tk"], self.nombre)
+        if c is None:
+            return await interaction.response.send_message("❌ Esa categoría ya no existe.", ephemeral=True)
+        valor = self.plantilla.value.strip()
+        if not valor:
+            valor = "ticket-{numero}"
+        c["nombre_canal"] = valor
+        save()
+        await interaction.response.edit_message(
+            embeds=[tk_cat_embed(interaction.guild.id, self.nombre)],
+            view=TkCatConfigView(self.nombre)
+        )
+
+
+class TkCatDescModal(discord.ui.Modal, title="Descripción de la categoría"):
+    def __init__(self, nombre: str, gid: int):
+        super().__init__()
+        self.nombre = nombre
+        c = _cat_tk(cfg(gid)["tk"], nombre) or {}
+        self.desc = discord.ui.TextInput(label="Descripción (se ve en el menú)", default=c.get("desc") or "", required=False, max_length=100)
+        self.add_item(self.desc)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        c = _cat_tk(cfg(interaction.guild.id)["tk"], self.nombre)
+        if c is None:
+            return await interaction.response.send_message("❌ Esa categoría ya no existe.", ephemeral=True)
+        c["desc"] = self.desc.value.strip()
+        save()
+        await interaction.response.edit_message(embeds=[tk_cat_embed(interaction.guild.id, self.nombre)], view=TkCatConfigView(self.nombre))
+
+
+class TkCatConfigView(AdminView):
+    def __init__(self, nombre: str):
+        super().__init__()
+        self.nombre = nombre
+
+    async def _refrescar(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(
+            embeds=[tk_cat_embed(interaction.guild.id, self.nombre)], view=TkCatConfigView(self.nombre))
+
+    @discord.ui.select(cls=discord.ui.RoleSelect, min_values=0, max_values=10,
+                       placeholder="Roles que atienden esta categoría", row=0)
+    async def roles(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        c = _cat_tk(cfg(interaction.guild.id)["tk"], self.nombre)
+        if c is None:
+            return await interaction.response.send_message("❌ Esa categoría ya no existe.", ephemeral=True)
+        c["roles"] = [r.id for r in select.values]
+        save()
+        await self._refrescar(interaction)
+
+    @discord.ui.select(cls=discord.ui.RoleSelect, min_values=0, max_values=10,
+                       placeholder="Roles a mencionar (ping) al abrir un ticket", row=1)
+    async def ping(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        c = _cat_tk(cfg(interaction.guild.id)["tk"], self.nombre)
+        if c is None:
+            return await interaction.response.send_message("❌ Esa categoría ya no existe.", ephemeral=True)
+        c["ping"] = [r.id for r in select.values]
+        save()
+        await self._refrescar(interaction)
+
+    @discord.ui.button(label="🎨 Mensaje de bienvenida", style=discord.ButtonStyle.primary, row=2)
+    async def bienvenida(self, interaction: discord.Interaction, button: discord.ui.Button):
+        t = cfg(interaction.guild.id)["tk"]
+        key = f"cat:{self.nombre}"
+        if key not in t["embeds"]:
+            t["embeds"][key] = dict(t["embeds"]["ticket"])  # parte del embed general
+            save()
+        view = StyleEditView("tk", key, tk_embed_panel, lambda i, n=self.nombre: volver_tk_cat(i, n))
+        await interaction.response.edit_message(embeds=tk_embed_panel(interaction.guild, interaction.user.id, key), view=view)
+
+    @discord.ui.button(label="↩️ Usar la bienvenida general", style=discord.ButtonStyle.secondary, row=2)
+    async def general(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cfg(interaction.guild.id)["tk"]["embeds"].pop(f"cat:{self.nombre}", None)
+        save()
+        await self._refrescar(interaction)
+
+    @discord.ui.button(label="🔤 Nombre del canal", style=discord.ButtonStyle.primary, row=3)
+    async def nombre_canal(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(TkCatNameModal(self.nombre, interaction.guild.id))
+
+    @discord.ui.button(label="✏️ Descripción", style=discord.ButtonStyle.secondary, row=3)
+    async def descripcion(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(TkCatDescModal(self.nombre, interaction.guild.id))
+
+    @discord.ui.button(label="⬅ Volver", style=discord.ButtonStyle.secondary, row=3)
+    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=tk_cats_embed(interaction.guild.id), view=TkCatsView(interaction.guild.id))
+
+
+class TkCatPickSelect(discord.ui.Select):
+    def __init__(self, cats):
+        super().__init__(
+            placeholder="⚙️ Configurar una categoría (roles, ping y bienvenida)",
+            options=[discord.SelectOption(label=c["nombre"][:100], value=c["nombre"][:100]) for c in cats], row=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        nombre = self.values[0]
+        await interaction.response.edit_message(embeds=[tk_cat_embed(interaction.guild.id, nombre)], view=TkCatConfigView(nombre))
+
+
+class TkPlaceholderModal(discord.ui.Modal, title="Texto del menú desplegable"):
+    def __init__(self, gid: int):
+        super().__init__()
+        actual = cfg(gid)["tk"].get("placeholder") or TK_PLACEHOLDER_DEFECTO
+        self.texto = discord.ui.TextInput(label="Texto que se ve en el menú del panel", default=actual, max_length=150)
+        self.add_item(self.texto)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        cfg(interaction.guild.id)["tk"]["placeholder"] = self.texto.value.strip() or TK_PLACEHOLDER_DEFECTO
+        save()
+        await interaction.response.edit_message(embed=tk_home_embed(interaction.guild.id), view=TkHomeView())
+        await interaction.followup.send("✅ Guardado. Vuelve a enviar el panel con `/ticket-panel` para ver el cambio.", ephemeral=True)
+
+
+class TkCatModal(discord.ui.Modal, title="Agregar categoría"):
+    def __init__(self):
+        super().__init__()
+        self.nombre = discord.ui.TextInput(label="Nombre de la categoría", max_length=50, placeholder="Ej: Reportes")
+        self.desc = discord.ui.TextInput(label="Descripción (opcional)", required=False, max_length=100)
+        self.add_item(self.nombre)
+        self.add_item(self.desc)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        t = cfg(interaction.guild.id)["tk"]
+        nombre = self.nombre.value.strip()
+        existente = next((c for c in t["cats"] if c["nombre"].lower() == nombre.lower()), None)
+        if existente:
+            existente["desc"] = self.desc.value.strip()
+        elif len(t["cats"]) >= 10:
+            return await interaction.response.send_message("❌ Máximo 10 categorías.", ephemeral=True)
+        else:
+            t["cats"].append({"nombre": nombre, "desc": self.desc.value.strip(), "roles": [], "ping": [], "nombre_canal": "ticket-{numero}"})
         save()
         await interaction.response.edit_message(embed=tk_cats_embed(interaction.guild.id), view=TkCatsView(interaction.guild.id))
 
@@ -4272,6 +6427,11 @@ async def configuracion(interaction: discord.Interaction):
 async def help_cmd(interaction: discord.Interaction):
     embed = discord.Embed(title="📖 Ayuda de Nexus", description="Guía rápida para configurar el bot:", color=0x5865F2)
     embed.add_field(name="1️⃣ Empieza aquí", value="Un admin usa `/configuracion` y elige una sección del menú.", inline=False)
+    embed.add_field(
+        name="💬 Auto-Responder",
+        value="En `/configuracion → Auto-Responder` puedes definir un disparador, canal y respuesta en embed.",
+        inline=False,
+    )
     embed.add_field(
         name="💡 Sugerencias",
         value="En `/configuracion → Sugerencias` elige el canal y los roles que aprueban. "
@@ -5205,6 +7365,35 @@ async def on_message(m: discord.Message):
     # Anti-Spam (si está activo y detecta spam, no se procesa más)
     if await antispam(m):
         return
+
+    # Auto-Responder: responde automáticamente con un embed configurable.
+    ar = cfg(m.guild.id)["auto"]
+    if ar.get("on") and ar.get("trigger"):
+        if (ar.get("canal") is None or m.channel.id == ar.get("canal")) and ar["trigger"].lower() in m.content.lower():
+            st = ar["respuesta"]
+            try:
+                color = int(st.get("color", "5865F2").lstrip("#"), 16)
+            except ValueError:
+                color = 0x5865F2
+            emb = discord.Embed(
+                title=st.get("titulo") or None,
+                description=st.get("descripcion") or None,
+                color=color,
+            )
+            if st.get("autor"):
+                emb.set_author(name=st["autor"])
+            if st.get("miniatura"):
+                emb.set_thumbnail(url=st["miniatura"])
+            if st.get("imagen"):
+                emb.set_image(url=st["imagen"])
+            if st.get("footer"):
+                emb.set_footer(text=st["footer"])
+            try:
+                await m.channel.send(embed=emb)
+                if ar.get("borrar_trigger"):
+                    await m.delete()
+            except discord.HTTPException:
+                pass
 
     # Canal de sugerencias: cada mensaje se convierte en embed
     c = cfg(m.guild.id)["sug"]
